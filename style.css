@@ -1,4 +1,4 @@
-﻿@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap');
 
 :root {
     --bg-0: #070b14;
@@ -301,6 +301,24 @@ th, td {
     border-bottom: 1px solid rgba(159, 178, 221, 0.2);
     overflow-wrap: anywhere;
     word-break: break-word;
+}
+
+/* Evento: mantieni Data/Ora leggibili e con spazio sufficiente */
+#eventTable th:nth-child(1),
+#eventTable td:nth-child(1) {
+    min-width: 92px;
+    white-space: nowrap;
+}
+
+#eventTable th:nth-child(2),
+#eventTable td:nth-child(2) {
+    min-width: 72px;
+    white-space: nowrap;
+}
+
+#eventTable th:nth-child(3),
+#eventTable td:nth-child(3) {
+    min-width: 180px;
 }
 
 th {
@@ -627,6 +645,23 @@ a:hover {
     td:nth-child(8) {
         width: 36px;
         text-align: center;
+    }
+
+    #eventTable th:nth-child(1),
+    #eventTable td:nth-child(1) {
+        width: 72px;
+        white-space: nowrap;
+    }
+
+    #eventTable th:nth-child(2),
+    #eventTable td:nth-child(2) {
+        width: 56px;
+        white-space: nowrap;
+    }
+
+    #eventTable th:nth-child(3),
+    #eventTable td:nth-child(3) {
+        width: 26%;
     }
 
     .news-filters {
