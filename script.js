@@ -298,9 +298,23 @@ function renderDashboardEvents() {
             <td>${evento.squadre}</td>
             <td>${evento.categoria}</td>
             <td>${evento.rimborso} €</td>
-            <td><a class="maps-link" target="_blank" href="${mapsUrl}">Apri Maps</a></td>
-            <td><a class="calendar-link" target="_blank" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(calendarText)}&dates=${formatDataGoogle(evento.data, evento.ora)}&details=${encodeURIComponent(calendarDetails)}&location=${encodeURIComponent(evento.locationText)}">Aggiungi</a></td>
-            <td><button type="button" class="event-remove-btn" onclick="removeDashboardEvent(${index})">-</button></td>
+            <td>
+                <a class="icon-link maps-link" target="_blank" rel="noopener noreferrer" href="${mapsUrl}" title="Apri su Google Maps" aria-label="Apri su Google Maps">
+                    <img src="maps.png" alt="Google Maps">
+                </a>
+            </td>
+            <td>
+                <a class="icon-link calendar-link" target="_blank" rel="noopener noreferrer" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(calendarText)}&dates=${formatDataGoogle(evento.data, evento.ora)}&details=${encodeURIComponent(calendarDetails)}&location=${encodeURIComponent(evento.locationText)}" title="Aggiungi a Google Calendar" aria-label="Aggiungi a Google Calendar">
+                    <img src="calendar.svg" alt="Google Calendar">
+                </a>
+            </td>
+            <td>
+                <button type="button" class="event-remove-btn" onclick="removeDashboardEvent(${index})" aria-label="Elimina evento" title="Elimina evento">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7A1 1 0 1 0 5.7 7.12L10.59 12l-4.9 4.89a1 1 0 0 0 1.42 1.41L12 13.41l4.89 4.9a1 1 0 0 0 1.41-1.42L13.41 12l4.9-4.89a1 1 0 0 0-.01-1.4z"></path>
+                    </svg>
+                </button>
+            </td>
         `;
         tbody.appendChild(row);
     });
