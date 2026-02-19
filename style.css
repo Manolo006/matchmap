@@ -624,27 +624,75 @@ a:hover {
         overflow-x: hidden;
     }
 
-    table {
+    /* Eventi: su mobile passa da tabella a card verticali leggibili */
+    #eventTable {
         min-width: 0;
-        table-layout: fixed;
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
     }
 
-    th,
-    td {
-        white-space: normal;
-        font-size: 0.78rem;
-        padding: 8px 6px;
-    }
-
-    th:nth-child(7),
-    td:nth-child(7) {
+    #eventTable thead {
         display: none;
     }
 
-    th:nth-child(8),
-    td:nth-child(8) {
-        width: 36px;
-        text-align: center;
+    #eventTable tbody,
+    #eventTable tr,
+    #eventTable td {
+        display: block;
+        width: 100%;
+    }
+
+    #eventTable tbody tr {
+        margin-bottom: 10px;
+        padding: 10px;
+        border: 1px solid rgba(159, 178, 221, 0.18);
+        border-radius: 14px;
+        background: rgba(9, 18, 37, 0.55);
+    }
+
+    #eventTable td {
+        border: 0;
+        padding: 5px 0;
+        white-space: normal;
+        font-size: 0.88rem;
+        line-height: 1.3;
+    }
+
+    #eventTable td::before {
+        display: block;
+        color: #bcd5ff;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        margin-bottom: 2px;
+    }
+
+    #eventTable td:nth-child(1)::before { content: "Data"; }
+    #eventTable td:nth-child(2)::before { content: "Ora"; }
+    #eventTable td:nth-child(3)::before { content: "Squadre"; }
+    #eventTable td:nth-child(4)::before { content: "Categoria"; }
+    #eventTable td:nth-child(5)::before { content: "Rimborso"; }
+    #eventTable td:nth-child(6)::before { content: "Maps"; }
+    #eventTable td:nth-child(7)::before { content: "Google Calendar"; }
+    #eventTable td:nth-child(8)::before { content: "Azione"; }
+
+    #eventTable td:nth-child(8) {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        padding-top: 8px;
+    }
+
+    #eventTable td:nth-child(8)::before {
+        margin: 0 auto 0 0;
+    }
+
+    #eventTable td:nth-child(8) .event-remove-btn {
+        min-width: 44px;
+        min-height: 44px;
+        padding: 0;
     }
 
     #eventTable th:nth-child(1),
