@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MatchMap - Account Center</title>
+<link rel="stylesheet" href="account-center.css">
+</head>
+<body>
+<div class="background"></div>
+<main class="page">
+    <header class="hero card">
+        <div>
+            <h1>Account Center</h1>
+            <p>Gestione account, dati utente e email automatiche Firebase.</p>
+        </div>
+        <div class="hero-actions">
+            <a href="index.html" class="btn">Home</a>
+        </div>
+    </header>
+
+    <section class="card">
+        <h2>Autenticazione</h2>
+        <div class="grid two">
+            <input id="authEmail" type="email" placeholder="Email">
+            <input id="authPassword" type="password" placeholder="Password">
+        </div>
+        <div class="actions">
+            <button id="registerBtn" class="btn primary" type="button">Registrati</button>
+            <button id="loginBtn" class="btn primary" type="button">Login</button>
+            <button id="logoutBtn" class="btn" type="button">Logout</button>
+        </div>
+        <p id="authStatus" class="status">In attesa.</p>
+    </section>
+
+    <section class="card">
+        <h2>Stato Account</h2>
+        <div id="accountInfo" class="kv"></div>
+    </section>
+
+    <section class="card">
+        <h2>Sicurezza Account</h2>
+        <div class="grid two">
+            <input id="resetEmailInput" type="email" placeholder="Email per reset password">
+            <input id="newEmailInput" type="email" placeholder="Nuova email account loggato">
+        </div>
+        <div class="actions">
+            <button id="sendResetBtn" class="btn primary" type="button">Invia Reset Password</button>
+            <button id="changeEmailBtn" class="btn" type="button">Modifica Email</button>
+            <button id="deleteAccountBtn" class="btn danger" type="button">Elimina Account</button>
+        </div>
+        <p id="emailStatus" class="status">Nessuna operazione.</p>
+    </section>
+</main>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="account-center.js"></script>
+</body>
+</html>

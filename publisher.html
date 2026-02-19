@@ -1,0 +1,116 @@
+﻿<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MatchMap Publisher - News</title>
+<link rel="stylesheet" href="publisher.css">
+</head>
+<body>
+<div class="bg"></div>
+
+<main class="wrap">
+    <header class="hero">
+        <div class="hero-top">
+            <div>
+                <h1>News Publisher</h1>
+                <p>Pannello privato per creare e pubblicare notizie rimborsi per regione.</p>
+            </div>
+            <div class="auth-anchor">
+                <button id="publisherAuthToggleBtn" class="auth-icon-btn" type="button" aria-label="Account">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"></path>
+                    </svg>
+                </button>
+                <div id="publisherAuthPopover" class="auth-popover" hidden>
+                    <h3>Account Firebase</h3>
+                    <div class="grid">
+                        <input id="loginEmail" type="email" placeholder="Email admin">
+                        <input id="loginPassword" type="password" placeholder="Password admin">
+                    </div>
+                    <div class="actions">
+                        <button id="loginBtn" class="primary" type="button">Login</button>
+                        <button id="logoutBtn" type="button">Logout</button>
+                    </div>
+                    <div class="actions account-link-row">
+                        <a href="account-center.html" class="auth-link-btn">Account Center</a>
+                    </div>
+                    <p id="authStatus" class="muted">Non autenticato</p>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <nav class="page-tabs">
+        <button type="button" class="page-tab active" data-page-target="newsPage">News</button>
+        <button type="button" class="page-tab" data-page-target="luoghiPage">Luoghi</button>
+    </nav>
+
+    <section id="newsPage" class="publisher-page active">
+        <section class="card">
+            <h2>Nuova Notizia</h2>
+            <div class="grid">
+                <select id="regionInput" placeholder="Seleziona Regione"></select>
+                <input id="titleInput" type="text" placeholder="Titolo notizia">
+                <textarea id="textInput" placeholder="Testo notizia"></textarea>
+            </div>
+            <div class="actions actions-split">
+                <div class="actions actions-inline">
+                    <button id="saveBtn" class="primary" type="button">Aggiungi</button>
+                    <button id="clearBtn" type="button">Svuota Campi</button>
+                </div>
+                <div class="actions actions-inline actions-right">
+                    <button id="publishBtn" type="button">Pubblica</button>
+                    <button id="loadRemoteBtn" type="button">Carica</button>
+                </div>
+            </div>
+            <p id="status" class="status"></p>
+        </section>
+
+        <section class="card">
+            <h2>Archivio News</h2>
+            <div id="emptyState" class="muted">Nessuna news presente.</div>
+            <div id="newsList" class="list"></div>
+        </section>
+
+    </section>
+
+    <section id="luoghiPage" class="publisher-page">
+        <section class="card">
+            <h2>Nuovo Luogo</h2>
+            <div class="grid">
+                <input id="luogoNomeInput" type="text" placeholder="Nome squadra/campo">
+                <input id="luogoIndirizzoInput" type="text" placeholder="Indirizzo">
+                <input id="luogoMapsInput" type="url" placeholder="Link Google Maps">
+                <input id="luogoCoordsInput" type="text" placeholder="Coordinate (es: 42.07926022435715, 12.340089506635858)">
+            </div>
+            <div class="actions actions-split">
+                <div class="actions actions-inline">
+                    <button id="pasteCoordsBtn" type="button">Prendi Coordinate da Appunti</button>
+                    <button id="luogoSaveBtn" class="primary" type="button">Aggiungi Luogo</button>
+                    <button id="luogoClearBtn" type="button">Svuota Campi</button>
+                </div>
+                <div class="actions actions-inline actions-right">
+                    <button id="luoghiPublishBtn" type="button">Pubblica Luoghi</button>
+                    <button id="luoghiLoadBtn" type="button">Carica Luoghi</button>
+                </div>
+            </div>
+            <p id="luoghiStatus" class="status"></p>
+        </section>
+
+        <section class="card">
+            <h2>Archivio Luoghi</h2>
+            <div id="luoghiEmptyState" class="muted">Nessun luogo presente.</div>
+            <div id="luoghiList" class="list"></div>
+        </section>
+
+    </section>
+</main>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
+<script src="firebase-config.js"></script>
+<script src="publisher.js"></script>
+</body>
+</html>

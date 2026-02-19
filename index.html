@@ -1,0 +1,139 @@
+﻿<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MatchMap - Gestione Designazioni</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+</head>
+<body>
+<div class="background-glow"></div>
+
+<header class="app-header">
+    <div class="app-header-top">
+        <div>
+            <h1>MatchMap</h1>
+            <p>Gestione designazioni, rimborsi e calendario in un unico spazio.</p>
+        </div>
+        <div class="auth-anchor">
+            <button id="authToggleBtn" class="auth-icon-btn" type="button" aria-label="Account">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"></path>
+                </svg>
+            </button>
+            <div id="authPopover" class="auth-popover" hidden>
+                <h3>Account Dashboard</h3>
+                <div class="auth-grid">
+                    <input id="userEmail" type="email" placeholder="Email">
+                    <input id="userPassword" type="password" placeholder="Password">
+                </div>
+                <div class="auth-actions">
+                    <button type="button" onclick="registerDashboardUser()">Registrati</button>
+                    <button type="button" onclick="loginDashboardUser()">Login</button>
+                    <button type="button" onclick="logoutDashboardUser()">Logout</button>
+                </div>
+                <div class="auth-actions">
+                    <a href="account-center.html" class="auth-link-btn">Account Center</a>
+                </div>
+                <p id="dashboardAuthStatus" class="auth-status">Modalita ospite attiva.</p>
+            </div>
+        </div>
+    </div>
+</header>
+
+<main class="container">
+    <div class="tab-buttons">
+        <button class="active" onclick="showTab('dashboard', this)">Dashboard</button>
+        <button onclick="showTab('news', this)">News</button>
+        <button onclick="showTab('payments', this)">Tabella Pagamenti</button>
+        <button onclick="showTab('map', this)">Mappa Campi</button>
+    </div>
+
+    <section id="dashboard" class="tab-content active">
+        <div class="panel input-panel">
+            <h2>Nuova designazione</h2>
+            <textarea id="designazione" placeholder="Incolla qui la designazione"></textarea>
+            <button class="primary-btn" onclick="aggiungiEvento()">Aggiungi Evento</button>
+            <div class="total" id="rimborsoTotale">Rimborso totale: 0 &euro;</div>
+        </div>
+
+        <div class="panel table-panel">
+            <h2>Eventi inseriti</h2>
+            <div class="table-wrap">
+                <table id="eventTable">
+                    <thead>
+                        <tr>
+                            <th>Data</th>
+                            <th>Ora</th>
+                            <th>Squadre</th>
+                            <th>Categoria</th>
+                            <th>Rimborso</th>
+                            <th>Maps</th>
+                            <th>Google Calendar</th>
+                            <th>-</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section id="news" class="tab-content">
+        <div class="panel news-panel">
+            <h2>Ultime notizie sui rimborsi</h2>
+            <div class="news-filters">
+                <label for="regionFilter">Regione</label>
+                <select id="regionFilter">
+                    <option value="all">Tutte le regioni</option>
+                </select>
+            </div>
+            <div id="newsContainer">
+            </div>
+        </div>
+    </section>
+
+    <section id="payments" class="tab-content">
+        <div class="panel payments-panel">
+            <h2>Tabella Pagamenti</h2>
+            <div class="payments-legend">
+                <span class="legend-item legend-confirmed">Pagamento confermato</span>
+                <span class="legend-item legend-monitoring">Da monitorare</span>
+                <span class="legend-item legend-planned">Previsto da tabella</span>
+            </div>
+            <div class="table-wrap">
+                <table id="paymentsTable">
+                    <thead>
+                        <tr>
+                            <th>Regione</th>
+                            <th>Pacchi in pagamento</th>
+                            <th>Fine Febbraio</th>
+                            <th>Riscontro chat</th>
+                            <th>Stato</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+
+    <section id="map" class="tab-content">
+        <div class="panel">
+            <h2>Mappa Campi Completati</h2>
+            <div id="luoghiMap"></div>
+            <p id="mapSummary" class="auth-status"></p>
+            <div id="missingCoordsList" class="news-item"></div>
+        </div>
+    </section>
+</main>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="firebase-config.js"></script>
+<script src="script.js"></script>
+</body>
+</html>
