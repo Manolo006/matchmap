@@ -14,6 +14,7 @@ let luoghiDb = [];
 let dashboardToastTimer = null;
 let luoghiMap = null;
 let luoghiMapLayer = null;
+const DASHBOARD_ADMIN_EMAILS = new Set(['manuelcarpita@gmail.com']);
 
 async function loadLuoghiDb() {
     try {
@@ -69,14 +70,60 @@ function findLuogoDbMatch(rawLocation) {
         return null;
     }
 
-    return luoghiDb.find(entry => {
-        const aliases = Array.isArray(entry.aliases) ? entry.aliases : [];
-        const searchable = [entry.nome, entry.indirizzo, ...aliases]
+    const words = new Set(target.split(' ').filter(Boolean));
+    let bestMatch = null;
+    let bestScore = 0;
+
+    luoghiDb.forEach(entry => {
+        const nome = normalizeText(entry?.nome);
+        const indirizzo = normalizeText(entry?.indirizzo);
+        const aliases = (Array.isArray(entry?.aliases) ? entry.aliases : [])
             .map(normalizeText)
             .filter(Boolean);
 
-        return searchable.some(token => target.includes(token) || token.includes(target));
-    }) || null;
+        let score = 0;
+
+        // Match forte su nome campo
+        if (nome && nome.length >= 5 && target.includes(nome)) {
+            score += 120;
+        }
+
+        // Match medio su indirizzo
+        if (indirizzo && indirizzo.length >= 8 && target.includes(indirizzo)) {
+            score += 80;
+        }
+
+        // Match su alias (ignora alias troppo corti o generici)
+        aliases.forEach(alias => {
+            if (alias.length >= 4 && target.includes(alias)) {
+                score += 45;
+            }
+        });
+
+        // Intersezione parole utile per casi incompleti
+        const candidateWords = new Set(
+            [nome, indirizzo, ...aliases]
+                .join(' ')
+                .split(' ')
+                .filter(token => token.length >= 4)
+        );
+        let overlap = 0;
+        candidateWords.forEach(token => {
+            if (words.has(token)) overlap += 1;
+        });
+        score += overlap * 4;
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestMatch = entry;
+        }
+    });
+
+    // Soglia minima per evitare match casuali
+    if (bestScore < 45) {
+        return null;
+    }
+    return bestMatch;
 }
 
 function getMapsUrl(evento) {
@@ -258,8 +305,9 @@ function buildCalendarDescription(evento) {
 
 function getDashboardAuthState() {
     const statusEl = document.getElementById('dashboardAuthStatus');
+    const publisherLinkEl = document.getElementById('publisherAdminLink');
     const fb = window.matchMapFirebase;
-    return { fb, statusEl };
+    return { fb, statusEl, publisherLinkEl };
 }
 
 function setDashboardAuthStatus(text, isOk = false) {
@@ -269,6 +317,28 @@ function setDashboardAuthStatus(text, isOk = false) {
     }
     statusEl.textContent = text;
     statusEl.style.color = isOk ? '#6ee7b7' : '#9fb2dd';
+}
+
+function isDashboardAdmin(user) {
+    if (!user) {
+        return false;
+    }
+    const email = String(user.email || '').trim().toLowerCase();
+    return DASHBOARD_ADMIN_EMAILS.has(email);
+}
+
+function setPublisherAdminLinkVisible(isVisible) {
+    const { publisherLinkEl } = getDashboardAuthState();
+    if (!publisherLinkEl) {
+        return;
+    }
+    publisherLinkEl.hidden = !isVisible;
+    publisherLinkEl.style.display = isVisible ? 'inline-flex' : 'none';
+    if (!isVisible) {
+        publisherLinkEl.removeAttribute('href');
+    } else {
+        publisherLinkEl.setAttribute('href', 'publisher.html');
+    }
 }
 
 function getCurrentDashboardUser() {
@@ -621,6 +691,7 @@ async function loginDashboardUser() {
 
 async function logoutDashboardUser() {
     const fb = window.matchMapFirebase;
+    setPublisherAdminLinkVisible(false);
     if (!fb?.ready || !fb.auth) {
         setDashboardAuthStatus('Firebase non disponibile.');
         return;
@@ -636,6 +707,7 @@ async function logoutDashboardUser() {
 
 function initDashboardAuth() {
     const fb = window.matchMapFirebase;
+    setPublisherAdminLinkVisible(false);
     if (!fb?.ready || !fb.auth) {
         setDashboardAuthStatus('Modalita ospite attiva (Firebase non disponibile).');
         loadDashboardEvents();
@@ -644,10 +716,15 @@ function initDashboardAuth() {
 
     fb.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
     fb.auth.onAuthStateChanged(async user => {
-        if (user) {
-            setDashboardAuthStatus(`Connesso come ${user.email}`, true);
-        } else {
+        if (!user) {
             setDashboardAuthStatus('Modalita ospite attiva.');
+            setPublisherAdminLinkVisible(false);
+        } else if (isDashboardAdmin(user)) {
+            setDashboardAuthStatus(`Connesso come ${user.email}`, true);
+            setPublisherAdminLinkVisible(true);
+        } else {
+            setDashboardAuthStatus(`Connesso come ${user.email} (no admin).`);
+            setPublisherAdminLinkVisible(false);
         }
         await loadDashboardEvents();
     });

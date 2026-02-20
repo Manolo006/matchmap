@@ -213,14 +213,51 @@ button:hover {
 .auth-link-btn {
     width: 100%;
     text-align: center;
-    border: 1px solid rgba(159, 178, 221, 0.35);
+    border: 1px solid transparent;
     border-radius: 999px;
     padding: 9px 10px;
-    color: var(--text);
+    color: #091225;
     text-decoration: none;
     font-size: 0.9rem;
     font-weight: 600;
-    background: rgba(255, 255, 255, 0.05);
+    background: linear-gradient(120deg, var(--accent), #7cd8f4);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding-inline: 8px;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.auth-link-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+}
+
+.auth-link-btn:hover,
+.auth-link-btn:focus,
+.auth-link-btn:active,
+.auth-link-btn:visited {
+    color: #091225;
+    text-decoration: none;
+    background: linear-gradient(120deg, var(--accent), #7cd8f4);
+    border-color: transparent;
+    filter: brightness(1.04);
+}
+
+.auth-link-btn:focus-visible {
+    outline: 2px solid rgba(159, 220, 255, 0.45);
+    outline-offset: 1px;
+}
+
+#publisherAdminLink[hidden] {
+    display: none !important;
 }
 
 .auth-grid {
@@ -605,6 +642,10 @@ a:hover {
     }
 
     .auth-popover .auth-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .auth-link-row {
         grid-template-columns: 1fr;
     }
 

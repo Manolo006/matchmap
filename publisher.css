@@ -385,6 +385,20 @@ button:hover {
     color: var(--danger);
 }
 
+.access-denied p {
+    margin: 8px 0 0;
+    color: var(--muted);
+}
+
+body.publisher-locked .page-tabs,
+body.publisher-locked .publisher-page {
+    display: none !important;
+}
+
+body.publisher-locked .access-denied {
+    display: block !important;
+}
+
 @media (max-width: 640px) {
     .hero,
     .page-tabs,

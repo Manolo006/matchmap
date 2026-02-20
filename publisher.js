@@ -1,5 +1,7 @@
-﻿const NEWS_DRAFT_KEY = 'matchmap_publisher_news_draft_v2';
+const NEWS_DRAFT_KEY = 'matchmap_publisher_news_draft_v2';
 const LUOGHI_DRAFT_KEY = 'matchmap_publisher_luoghi_draft_v1';
+const ADMIN_EMAILS = new Set(['manuelcarpita@gmail.com']);
+const ADMIN_UIDS = new Set([]);
 
 const ITALIAN_REGIONS = [
     'Tutti',
@@ -63,6 +65,7 @@ const loginPassword = document.getElementById('loginPassword');
 const loginBtn = document.getElementById('loginBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 const authStatus = document.getElementById('authStatus');
+const accessDeniedCard = document.getElementById('publisherAccessDenied');
 
 function getFirebaseState() {
     return window.matchMapFirebase || { ready: false, auth: null, db: null };
@@ -92,6 +95,32 @@ function setAuthStatus(message, ok = false) {
     authStatus.className = ok ? 'status ok' : 'muted';
 }
 
+function isPublisherAdmin(user) {
+    if (!user) {
+        return false;
+    }
+    const email = String(user.email || '').trim().toLowerCase();
+    return ADMIN_UIDS.has(user.uid) || ADMIN_EMAILS.has(email);
+}
+function setPublisherAccess(isAdmin) {
+    document.body.classList.toggle('publisher-locked', !isAdmin);
+    if (accessDeniedCard) {
+        accessDeniedCard.hidden = isAdmin;
+    }
+}
+function getPublisherUser() {
+    const fb = getFirebaseState();
+    return fb?.ready && fb.auth ? fb.auth.currentUser : null;
+}
+function requirePublisherAdmin() {
+    const user = getPublisherUser();
+    const isAdmin = isPublisherAdmin(user);
+    if (!isAdmin) {
+        setStatus('Accesso negato: solo admin autorizzato.', 'err');
+        setLuoghiStatus('Accesso negato: solo admin autorizzato.', 'err');
+    }
+    return isAdmin;
+}
 function ensureRegionOption(value) {
     const normalized = (value || '').trim();
     if (!normalized) {
@@ -496,6 +525,9 @@ async function pasteCoordinatesFromClipboard() {
 }
 
 function handleSaveNews() {
+    if (!requirePublisherAdmin()) {
+        return;
+    }
     const data = validateNewsForm();
     if (!data) {
         return;
@@ -515,6 +547,9 @@ function handleSaveNews() {
 }
 
 function handleSaveLuogo() {
+    if (!requirePublisherAdmin()) {
+        return;
+    }
     const data = validateLuogoForm();
     if (!data) {
         return;
@@ -534,6 +569,9 @@ function handleSaveLuogo() {
 }
 
 async function publishNewsFirebase() {
+    if (!requirePublisherAdmin()) {
+        return;
+    }
     const fb = getFirebaseState();
     if (!fb.ready || !fb.db || !fb.auth) {
         setStatus('Firebase non inizializzato.', 'err');
@@ -584,6 +622,9 @@ async function loadNewsFromFirebase(silent = false) {
 }
 
 async function publishLuoghiFirebase() {
+    if (!requirePublisherAdmin()) {
+        return;
+    }
     const fb = getFirebaseState();
     if (!fb.ready || !fb.db || !fb.auth) {
         setLuoghiStatus('Firebase non inizializzato.', 'err');
@@ -685,12 +726,18 @@ function bindAuthState() {
     const fb = getFirebaseState();
     if (!fb.ready || !fb.auth) {
         setAuthStatus('Firebase non disponibile', false);
+        setPublisherAccess(false);
         return;
     }
 
     fb.auth.onAuthStateChanged(user => {
-        if (user) {
-            setAuthStatus(`Autenticato: ${user.email}`, true);
+        const isAdmin = isPublisherAdmin(user);
+        setPublisherAccess(isAdmin);
+
+        if (user && isAdmin) {
+            setAuthStatus(`Autenticato admin: ${user.email}`, true);
+        } else if (user) {
+            setAuthStatus(`Accesso negato per ${user.email}`, false);
         } else {
             setAuthStatus('Non autenticato', false);
         }
@@ -737,6 +784,10 @@ function setupPageTabs() {
 }
 
 newsList.addEventListener('click', event => {
+    if (!requirePublisherAdmin()) {
+        return;
+    }
+
     const target = event.target;
     if (!(target instanceof HTMLElement)) {
         return;
@@ -760,6 +811,10 @@ newsList.addEventListener('click', event => {
 });
 
 luoghiList.addEventListener('click', event => {
+    if (!requirePublisherAdmin()) {
+        return;
+    }
+
     const target = event.target;
     if (!(target instanceof HTMLElement)) {
         return;
@@ -800,6 +855,7 @@ loginBtn.addEventListener('click', firebaseLogin);
 logoutBtn.addEventListener('click', firebaseLogout);
 
 async function initPublisher() {
+    setPublisherAccess(false);
     restoreDrafts();
     populateRegionSelect();
     newsItems.forEach(item => ensureRegionOption(item.regione));
@@ -818,3 +874,4 @@ async function initPublisher() {
 }
 
 initPublisher();
+
