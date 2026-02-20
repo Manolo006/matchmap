@@ -73,6 +73,19 @@ body {
     position: relative;
 }
 
+.app-brand {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.app-logo {
+    width: clamp(42px, 6vw, 56px);
+    height: clamp(42px, 6vw, 56px);
+    object-fit: contain;
+    border-radius: 12px;
+}
+
 .container {
     max-width: var(--page-max);
     margin: clamp(14px, 2.8vw, 22px) auto clamp(22px, 4vw, 40px);
@@ -639,6 +652,10 @@ a:hover {
 
     .app-header-top {
         flex-direction: column;
+    }
+
+    .app-brand {
+        align-items: center;
     }
 
     .auth-popover .auth-actions {

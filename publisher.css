@@ -72,6 +72,19 @@ body {
     color: var(--muted);
 }
 
+.hero-brand {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.hero-logo {
+    width: clamp(40px, 5vw, 54px);
+    height: clamp(40px, 5vw, 54px);
+    border-radius: 12px;
+    object-fit: contain;
+}
+
 .hero-top {
     display: flex;
     justify-content: space-between;
@@ -417,6 +430,10 @@ body.publisher-locked .access-denied {
 
     .hero-top {
         flex-direction: column;
+    }
+
+    .hero-brand {
+        align-items: center;
     }
 
     .auth-popover {

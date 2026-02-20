@@ -37,7 +37,6 @@
 
         el.accountInfo.innerHTML = [
             ['Email', user.email || '-'],
-            ['Display Name', user.displayName || '-'],
             ['Creato', user.metadata && user.metadata.creationTime ? user.metadata.creationTime : '-'],
             ['Ultimo accesso', user.metadata && user.metadata.lastSignInTime ? user.metadata.lastSignInTime : '-']
         ].map(function (row) {

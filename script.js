@@ -43,6 +43,39 @@ function normalizeText(value) {
         .trim();
 }
 
+function getRegionLogoPath(regionName) {
+    const region = normalizeText(regionName);
+    if (!region) {
+        return null;
+    }
+
+    const regionLogoMap = {
+        'abruzzo': 'img/abruzzo.png',
+        'basilicata': 'img/basilicata.png',
+        'calabria': 'img/calabria.png',
+        'campania': 'img/campania.png',
+        // file locale presente come "emilia_romania.png"
+        'emilia romagna': 'img/emilia_romania.png',
+        'friuli venezia giulia': 'img/friuli.png',
+        'lazio': 'img/lazio.png',
+        'liguria': 'img/liguria.png',
+        'lombardia': 'img/lombardia.png',
+        'marche': 'img/marche.png',
+        'molise': 'img/molise.png',
+        'piemonte': 'img/piemonte.png',
+        'puglia': 'img/puglia.png',
+        'sardegna': 'img/sardegna.png',
+        'sicilia': 'img/sicilia.png',
+        'toscana': 'img/toscana.png',
+        'trentino alto adige': 'img/trentino_alto_adige.png',
+        'umbria': 'img/umbria.png',
+        'valle d aosta': 'img/valle_daosta.png',
+        'veneto': 'img/veneto.png'
+    };
+
+    return regionLogoMap[region] || null;
+}
+
 function showDashboardToast(message, type = 'warn') {
     let toast = document.getElementById('dashboardToast');
     if (!toast) {
@@ -370,12 +403,12 @@ function renderDashboardEvents() {
             <td>${evento.rimborso} €</td>
             <td>
                 <a class="icon-link maps-link" target="_blank" rel="noopener noreferrer" href="${mapsUrl}" title="Apri su Google Maps" aria-label="Apri su Google Maps">
-                    <img src="maps.png" alt="Google Maps">
+                    <img src="img/maps.png" alt="Google Maps">
                 </a>
             </td>
             <td>
                 <a class="icon-link calendar-link" target="_blank" rel="noopener noreferrer" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(calendarText)}&dates=${formatDataGoogle(evento.data, evento.ora)}&details=${encodeURIComponent(calendarDetails)}&location=${encodeURIComponent(evento.locationText)}" title="Aggiungi a Google Calendar" aria-label="Aggiungi a Google Calendar">
-                    <img src="calendar.svg" alt="Google Calendar">
+                    <img src="img/calendar.svg" alt="Google Calendar">
                 </a>
             </td>
             <td>
@@ -549,8 +582,15 @@ function renderNews(selectedRegion = 'all') {
 
         const card = document.createElement('article');
         card.className = `news-item ${colorClass}`;
+        const regionLogoPath = getRegionLogoPath(item.regione);
+        const logoMarkup = regionLogoPath
+            ? `<img class="news-region-logo" src="${regionLogoPath}" alt="Logo ${item.regione}" loading="lazy" decoding="async" onerror="this.style.display='none'">`
+            : '';
         card.innerHTML = `
-            <h4>${item.titolo}</h4>
+            <div class="news-item-head">
+                ${logoMarkup}
+                <h4>${item.titolo}</h4>
+            </div>
             <p><strong>${item.regione}:</strong> ${item.testo}</p>
         `;
         container.appendChild(card);
