@@ -29,6 +29,7 @@ const ITALIAN_REGIONS = [
 
 let newsItems = [];
 let luoghiItems = [];
+let suggestionItems = [];
 let editNewsIndex = -1;
 let editLuogoIndex = -1;
 let geoResolveTimer = null;
@@ -59,6 +60,10 @@ const luoghiPublishBtn = document.getElementById('luoghiPublishBtn');
 const luoghiLoadBtn = document.getElementById('luoghiLoadBtn');
 const luoghiPreview = document.getElementById('luoghiPreview');
 const luoghiStatusEl = document.getElementById('luoghiStatus');
+const suggestionsLoadBtn = document.getElementById('suggestionsLoadBtn');
+const suggestionsStatusEl = document.getElementById('suggestionsStatus');
+const suggestionsEmptyState = document.getElementById('suggestionsEmptyState');
+const suggestionsList = document.getElementById('suggestionsList');
 
 const loginEmail = document.getElementById('loginEmail');
 const loginPassword = document.getElementById('loginPassword');
@@ -79,6 +84,24 @@ function setStatus(message, type = '') {
 function setLuoghiStatus(message, type = '') {
     luoghiStatusEl.textContent = message;
     luoghiStatusEl.className = `status ${type}`.trim();
+}
+
+function setSuggestionsStatus(message, type = '') {
+    if (!suggestionsStatusEl) {
+        return;
+    }
+    suggestionsStatusEl.textContent = message;
+    suggestionsStatusEl.className = `status ${type}`.trim();
+}
+
+function normalizeText(value) {
+    return String(value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 function pickFirst(obj, keys) {
@@ -172,6 +195,25 @@ function normalizeLuogo(item) {
         lat: Number.isFinite(lat) ? lat : null,
         lng: Number.isFinite(lng) ? lng : null,
         fatto: true
+    };
+}
+
+function normalizeSuggestion(item, key) {
+    const raw = item || {};
+    return {
+        id: key || raw.id || '',
+        type: String(raw.type || '').trim(),
+        team: String(raw.team || '').trim(),
+        title: String(raw.title || '').trim(),
+        text: String(raw.text || '').trim(),
+        mapsUrl: String(raw.mapsUrl || '').trim(),
+        proofUrl: String(raw.proofUrl || '').trim(),
+        status: String(raw.status || 'pending').trim(),
+        checks: raw.checks || {},
+        coordinates: raw.coordinates || null,
+        createdAt: Number(raw.createdAt || 0),
+        createdByEmail: String(raw.createdByEmail || '').trim(),
+        createdByUid: String(raw.createdByUid || '').trim()
     };
 }
 
@@ -328,6 +370,47 @@ function renderAll() {
     renderNewsPreview();
     renderLuoghiList();
     renderLuoghiPreview();
+    renderSuggestionsList();
+}
+
+function renderSuggestionsList() {
+    if (!suggestionsList || !suggestionsEmptyState) {
+        return;
+    }
+    suggestionsList.innerHTML = '';
+
+    if (!suggestionItems.length) {
+        suggestionsEmptyState.style.display = 'block';
+        return;
+    }
+    suggestionsEmptyState.style.display = 'none';
+
+    suggestionItems.forEach(item => {
+        const created = item.createdAt
+            ? new Date(item.createdAt).toLocaleString('it-IT')
+            : '-';
+        const canReview = item.status === 'pending';
+        const score = Number(Boolean(item.checks?.hasProofUrl)) + Number(Boolean(item.checks?.hasMapsCoords));
+        const scoreLabel = score === 2 ? 'Alta' : score === 1 ? 'Media' : 'Bassa';
+        const mapsLink = item.mapsUrl ? `<a class="item-action-link" href="${item.mapsUrl}" target="_blank" rel="noopener noreferrer">Maps</a>` : '';
+        const proofLink = item.proofUrl ? `<a class="item-action-link" href="${item.proofUrl}" target="_blank" rel="noopener noreferrer">Fonte</a>` : '';
+        const actions = canReview
+            ? `<button type="button" data-action="approve-suggestion" data-id="${item.id}">Approva</button>
+               <button type="button" data-action="reject-suggestion" data-id="${item.id}">Rifiuta</button>`
+            : `<span class="muted">Gia revisionata (${item.status})</span>`;
+
+        const card = document.createElement('article');
+        card.className = 'item';
+        card.innerHTML = `
+            <h3>${item.title || '(senza titolo)'}</h3>
+            <div class="meta">Tipo: ${item.type || '-'} | Squadra: ${item.team || '-'} | Affidabilita: ${scoreLabel}</div>
+            <div class="meta">Utente: ${item.createdByEmail || 'anonimo'} | Data: ${created}</div>
+            <p>${item.text || '-'}</p>
+            <div class="item-actions">${mapsLink}${proofLink}</div>
+            <div class="item-actions">${actions}</div>
+        `;
+        suggestionsList.appendChild(card);
+    });
 }
 
 function validateNewsForm() {
@@ -744,6 +827,137 @@ function bindAuthState() {
     });
 }
 
+async function loadSuggestionsFromFirebase(silent = false) {
+    const fb = getFirebaseState();
+    if (!fb.ready || !fb.db) {
+        if (!silent) {
+            setSuggestionsStatus('Firebase non inizializzato.', 'err');
+        }
+        return false;
+    }
+
+    try {
+        const snap = await fb.db.ref('suggestions').once('value');
+        const raw = snap.exists() ? snap.val() : {};
+        suggestionItems = Object.entries(raw || {})
+            .map(([key, value]) => normalizeSuggestion(value, key))
+            .filter(item => item.status === 'pending')
+            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        renderSuggestionsList();
+        if (!silent) {
+            setSuggestionsStatus(`Segnalazioni in coda: ${suggestionItems.length}`, 'ok');
+        }
+        return true;
+    } catch (error) {
+        if (!silent) {
+            setSuggestionsStatus(`Errore caricamento: ${error.message}`, 'err');
+        }
+        return false;
+    }
+}
+
+function isDuplicateLuogoSuggestion(suggestion) {
+    const targetName = normalizeText(suggestion.team || suggestion.title);
+    const targetMaps = normalizeText(suggestion.mapsUrl);
+    return luoghiItems.some(item => {
+        const sameName = targetName && normalizeText(item.nome).includes(targetName);
+        const sameMaps = targetMaps && normalizeText(item.mapsUrl) === targetMaps;
+        return sameName || sameMaps;
+    });
+}
+
+async function approveSuggestionById(suggestionId) {
+    if (!requirePublisherAdmin()) {
+        return;
+    }
+    const fb = getFirebaseState();
+    const suggestion = suggestionItems.find(item => item.id === suggestionId);
+    if (!suggestion || !fb.ready || !fb.db || !fb.auth?.currentUser) {
+        setSuggestionsStatus('Segnalazione non trovata o Firebase non pronto.', 'err');
+        return;
+    }
+
+    try {
+        if (suggestion.type === 'campo') {
+            if (isDuplicateLuogoSuggestion(suggestion)) {
+                await fb.db.ref(`suggestions/${suggestion.id}`).update({
+                    status: 'duplicate',
+                    reviewedAt: Date.now(),
+                    reviewedBy: fb.auth.currentUser.email || fb.auth.currentUser.uid
+                });
+                setSuggestionsStatus('Campo gia presente: segnalazione marcata come duplicata.', 'err');
+            } else {
+                luoghiItems.push(normalizeLuogo({
+                    nome: suggestion.team || suggestion.title,
+                    indirizzo: '',
+                    mapsUrl: suggestion.mapsUrl,
+                    lat: suggestion.coordinates?.lat ?? null,
+                    lng: suggestion.coordinates?.lng ?? null
+                }));
+                saveLuoghiDraft();
+                await fb.db.ref('luoghi').set(luoghiItems.map(normalizeLuogo));
+                await fb.db.ref(`suggestions/${suggestion.id}`).update({
+                    status: 'approved',
+                    reviewedAt: Date.now(),
+                    reviewedBy: fb.auth.currentUser.email || fb.auth.currentUser.uid,
+                    target: 'luoghi'
+                });
+                setSuggestionsStatus('Segnalazione approvata e pubblicata in luoghi.', 'ok');
+            }
+        } else {
+            newsItems.push(normalizeNews({
+                regione: 'Tutti',
+                titolo: suggestion.title,
+                testo: suggestion.text
+            }));
+            saveNewsDraft();
+            await fb.db.ref('news').set(newsItems.map(normalizeNews));
+            await fb.db.ref(`suggestions/${suggestion.id}`).update({
+                status: 'approved',
+                reviewedAt: Date.now(),
+                reviewedBy: fb.auth.currentUser.email || fb.auth.currentUser.uid,
+                target: 'news'
+            });
+            setSuggestionsStatus('Segnalazione approvata e pubblicata in news.', 'ok');
+        }
+
+        await Promise.all([
+            loadSuggestionsFromFirebase(true),
+            loadNewsFromFirebase(true),
+            loadLuoghiFromFirebase(true)
+        ]);
+        renderAll();
+    } catch (error) {
+        setSuggestionsStatus(`Errore approvazione: ${error.message}`, 'err');
+    }
+}
+
+async function rejectSuggestionById(suggestionId) {
+    if (!requirePublisherAdmin()) {
+        return;
+    }
+    const fb = getFirebaseState();
+    if (!fb.ready || !fb.db || !fb.auth?.currentUser) {
+        setSuggestionsStatus('Firebase non pronto.', 'err');
+        return;
+    }
+
+    const reason = window.prompt('Motivo rifiuto (opzionale):', '') || '';
+    try {
+        await fb.db.ref(`suggestions/${suggestionId}`).update({
+            status: 'rejected',
+            rejectReason: reason.trim(),
+            reviewedAt: Date.now(),
+            reviewedBy: fb.auth.currentUser.email || fb.auth.currentUser.uid
+        });
+        setSuggestionsStatus('Segnalazione rifiutata.', 'ok');
+        await loadSuggestionsFromFirebase(true);
+        renderSuggestionsList();
+    } catch (error) {
+        setSuggestionsStatus(`Errore rifiuto: ${error.message}`, 'err');
+    }
+}
+
 function setupPublisherAuthPopover() {
     const toggleBtn = document.getElementById('publisherAuthToggleBtn');
     const popover = document.getElementById('publisherAuthPopover');
@@ -853,6 +1067,31 @@ pasteCoordsBtn.addEventListener('click', pasteCoordinatesFromClipboard);
 
 loginBtn.addEventListener('click', firebaseLogin);
 logoutBtn.addEventListener('click', firebaseLogout);
+if (suggestionsLoadBtn) {
+    suggestionsLoadBtn.addEventListener('click', () => loadSuggestionsFromFirebase(false));
+}
+
+if (suggestionsList) {
+    suggestionsList.addEventListener('click', event => {
+        if (!requirePublisherAdmin()) {
+            return;
+        }
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+            return;
+        }
+        const suggestionId = String(target.dataset.id || '').trim();
+        if (!suggestionId) {
+            return;
+        }
+        if (target.dataset.action === 'approve-suggestion') {
+            approveSuggestionById(suggestionId);
+        }
+        if (target.dataset.action === 'reject-suggestion') {
+            rejectSuggestionById(suggestionId);
+        }
+    });
+}
 
 async function initPublisher() {
     setPublisherAccess(false);
@@ -866,11 +1105,13 @@ async function initPublisher() {
 
     await Promise.all([
         loadNewsFromFirebase(true),
-        loadLuoghiFromFirebase(true)
+        loadLuoghiFromFirebase(true),
+        loadSuggestionsFromFirebase(true)
     ]);
 
     setStatus('Pronto. Pagina News collegata a /news.', 'ok');
     setLuoghiStatus('Pronto. Pagina Luoghi collegata a /luoghi.', 'ok');
+    setSuggestionsStatus('Pronto. Coda segnalazioni collegata a /suggestions.', 'ok');
 }
 
 initPublisher();

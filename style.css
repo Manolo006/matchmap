@@ -630,6 +630,31 @@ a:hover {
     margin-top: 12px;
 }
 
+.suggestion-form {
+    display: grid;
+    gap: 10px;
+    margin-top: 16px;
+}
+
+.suggestion-form input,
+.suggestion-form select,
+.suggestion-form textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 16px;
+    border: 1px solid rgba(159, 178, 221, 0.35);
+    background: rgba(9, 18, 37, 0.9);
+    color: var(--text);
+    font-family: inherit;
+    outline: none;
+}
+
+.suggestion-form select:focus,
+.suggestion-form input:focus,
+.suggestion-form textarea:focus {
+    border-color: var(--accent);
+}
+
 @media (max-width: 1024px) {
     .tab-buttons {
         grid-template-columns: repeat(2, minmax(0, 1fr));

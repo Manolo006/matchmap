@@ -130,6 +130,17 @@
             <div id="luoghiMap"></div>
             <p id="mapSummary" class="auth-status"></p>
             <div id="missingCoordsList" class="news-item"></div>
+            <div class="suggestion-form">
+                <h3>Segnala Nuovo Campo</h3>
+                <p class="auth-status">Le segnalazioni campo vengono verificate prima della pubblicazione.</p>
+                <input id="suggestTitle" type="text" placeholder="Titolo segnalazione">
+                <input id="suggestTeam" type="text" placeholder="Nome squadra">
+                <input id="suggestMaps" type="url" placeholder="Link Google Maps (obbligatorio)">
+                <input id="suggestProofUrl" type="url" placeholder="Link Tuttocampo (facoltativo)">
+                <textarea id="suggestText" placeholder="Descrivi il campo e cosa hai verificato"></textarea>
+                <button class="primary-btn" type="button" onclick="submitUserSuggestion()">Invia Segnalazione Campo</button>
+                <p id="suggestionStatus" class="auth-status">Nessuna segnalazione inviata.</p>
+            </div>
         </div>
     </section>
 </main>

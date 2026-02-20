@@ -1,4 +1,4 @@
-﻿/* TAB SWITCH */
+/* TAB SWITCH */
 function showTab(tabId, clickedButton) {
     document.querySelectorAll('.tab-content').forEach(tc => tc.classList.remove('active'));
     document.getElementById(tabId).classList.add('active');
@@ -15,6 +15,7 @@ let dashboardToastTimer = null;
 let luoghiMap = null;
 let luoghiMapLayer = null;
 const DASHBOARD_ADMIN_EMAILS = new Set(['manuelcarpita@gmail.com']);
+const AUTO_FIELD_SUGGESTIONS_CACHE_KEY = 'matchmap_auto_field_suggestions_v1';
 
 async function loadLuoghiDb() {
     try {
@@ -265,6 +266,7 @@ function renderLuoghiMap() {
 /* PARSING DESIGNAZIONE */
 const GUEST_EVENTS_STORAGE_KEY = 'matchmap_guest_dashboard_events_v1';
 let dashboardEvents = [];
+const SUGGESTION_COOLDOWN_KEY = 'matchmap_last_suggestion_ts_v1';
 
 function parseDesignazione(testo) {
     const dataRegex = /(\d{2}\/\d{2}\/\d{4})/i;
@@ -313,6 +315,134 @@ function buildEventFingerprint(evento) {
         evento.impianto || ''
     ];
     return normalizeText(keyParts.join('|'));
+}
+
+function buildAutoFieldSuggestionKey(evento) {
+    const keyParts = [
+        evento.squadre || '',
+        evento.luogo || '',
+        evento.impianto || '',
+        evento.indirizzo || '',
+        evento.data || '',
+        evento.ora || ''
+    ];
+    return normalizeText(keyParts.join('|'));
+}
+
+function getPrimaryTeamName(squadreText) {
+    const teams = String(squadreText || '')
+        .split(/\s*-\s*/)
+        .map(item => item.trim())
+        .filter(Boolean);
+    return teams[0] || String(squadreText || '').trim() || 'Squadra non trovata';
+}
+
+function readAutoSuggestionsCache() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(AUTO_FIELD_SUGGESTIONS_CACHE_KEY) || '[]');
+        return new Set(Array.isArray(raw) ? raw : []);
+    } catch {
+        return new Set();
+    }
+}
+
+function writeAutoSuggestionsCache(cacheSet) {
+    localStorage.setItem(AUTO_FIELD_SUGGESTIONS_CACHE_KEY, JSON.stringify([...cacheSet]));
+}
+
+async function hasPendingSuggestionWithSameKey(db, suggestionKey) {
+    try {
+        const snap = await db.ref('suggestions').once('value');
+        if (!snap.exists()) {
+            return false;
+        }
+        const items = Object.values(snap.val() || {});
+        return items.some(item => {
+            const status = String(item?.status || '').trim().toLowerCase();
+            const existingKey = String(item?.sourceKey || '').trim();
+            return status === 'pending' && existingKey === suggestionKey;
+        });
+    } catch {
+        return false;
+    }
+}
+
+async function autoSuggestFieldFromDesignazione(evento) {
+    const fb = window.matchMapFirebase;
+    if (!fb?.ready || !fb.db) {
+        return;
+    }
+
+    if (!evento?.squadre || !evento?.locationText) {
+        return;
+    }
+
+    // Se il luogo e gia riconosciuto nel DB campi non serve segnalazione.
+    const existingMatch = findLuogoDbMatch(evento.locationText);
+    if (existingMatch) {
+        return;
+    }
+
+    const suggestionKey = buildAutoFieldSuggestionKey(evento);
+    if (!suggestionKey) {
+        return;
+    }
+
+    const cache = readAutoSuggestionsCache();
+    if (cache.has(suggestionKey)) {
+        return;
+    }
+
+    const alreadyPending = await hasPendingSuggestionWithSameKey(fb.db, suggestionKey);
+    if (alreadyPending) {
+        cache.add(suggestionKey);
+        writeAutoSuggestionsCache(cache);
+        return;
+    }
+
+    const teamName = getPrimaryTeamName(evento.squadre);
+    const mapsCandidateUrl = getMapsUrl(evento);
+    const proofUrl = `https://www.google.com/search?q=${encodeURIComponent(`${teamName} ${evento.indirizzo || evento.locationText}`)}`;
+    const coords = extractCoordinatesFromMapsUrl(mapsCandidateUrl);
+    const hasCoords = Boolean(coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng));
+    const user = getCurrentDashboardUser();
+
+    const payload = {
+        type: 'campo',
+        team: teamName,
+        title: `Nuovo campo da designazione: ${teamName}`,
+        text: `Proposta automatica da designazione. Campo: ${evento.impianto || evento.luogo || 'N/D'}. Indirizzo: ${evento.indirizzo || evento.locationText}. Gara n.${evento.garaNumero || 'N/D'} del ${evento.data || 'N/D'} ore ${evento.ora || 'N/D'}.`,
+        mapsUrl: mapsCandidateUrl,
+        proofUrl,
+        status: 'pending',
+        source: 'auto_designazione',
+        sourceKey: suggestionKey,
+        extracted: {
+            garaNumero: evento.garaNumero || '',
+            categoria: evento.categoria || '',
+            squadre: evento.squadre || '',
+            luogo: evento.luogo || '',
+            impianto: evento.impianto || '',
+            indirizzo: evento.indirizzo || ''
+        },
+        checks: {
+            hasProofUrl: true,
+            hasMapsCoords: hasCoords
+        },
+        coordinates: hasCoords ? coords : null,
+        createdAt: Date.now(),
+        createdByUid: user?.uid || null,
+        createdByEmail: user?.email || null
+    };
+
+    try {
+        await fb.db.ref('suggestions').push(payload);
+        cache.add(suggestionKey);
+        writeAutoSuggestionsCache(cache);
+        showDashboardToast('Nuovo campo non presente: inviato automaticamente in revisione.', 'warn');
+    } catch {
+        // silenzioso: non blocca l'inserimento evento dashboard
+    }
 }
 
 function subtractOneHour(timeStr) {
@@ -495,6 +625,7 @@ async function aggiungiEvento() {
     dashboardEvents.push(evento);
     renderDashboardEvents();
     await persistDashboardEvents();
+    await autoSuggestFieldFromDesignazione(evento);
     textarea.value = '';
 }
 
@@ -791,10 +922,98 @@ function setupAuthPopover() {
     });
 }
 
+function setSuggestionStatus(message, isOk = false) {
+    const statusEl = document.getElementById('suggestionStatus');
+    if (!statusEl) {
+        return;
+    }
+    statusEl.textContent = message;
+    statusEl.style.color = isOk ? '#6ee7b7' : '#9fb2dd';
+}
+
+function extractCoordinatesFromMapsUrl(url) {
+    const value = String(url || '').trim();
+    if (!value) {
+        return null;
+    }
+    let match = value.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/i);
+    if (match) {
+        return { lat: Number(match[1]), lng: Number(match[2]) };
+    }
+    match = value.match(/@(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/i);
+    if (match) {
+        return { lat: Number(match[1]), lng: Number(match[2]) };
+    }
+    return null;
+}
+
+async function submitUserSuggestion() {
+    const fb = window.matchMapFirebase;
+    if (!fb?.ready || !fb.db) {
+        setSuggestionStatus('Firebase non disponibile. Riprova tra poco.');
+        return;
+    }
+
+    const type = 'campo';
+    const team = (document.getElementById('suggestTeam')?.value || '').trim();
+    const title = (document.getElementById('suggestTitle')?.value || '').trim();
+    const text = (document.getElementById('suggestText')?.value || '').trim();
+    const mapsUrl = (document.getElementById('suggestMaps')?.value || '').trim();
+    const proofUrl = (document.getElementById('suggestProofUrl')?.value || '').trim();
+
+    if (!title || !team || !text || !mapsUrl) {
+        setSuggestionStatus('Compila titolo, squadra, link maps e descrizione.');
+        return;
+    }
+
+    const now = Date.now();
+    const lastTs = Number(localStorage.getItem(SUGGESTION_COOLDOWN_KEY) || 0);
+    if (now - lastTs < 15000) {
+        setSuggestionStatus('Attendi qualche secondo prima di inviare un altra segnalazione.');
+        return;
+    }
+
+    const coords = extractCoordinatesFromMapsUrl(mapsUrl);
+    const hasCoords = Boolean(coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng));
+    const user = getCurrentDashboardUser();
+
+    const payload = {
+        type,
+        team: team || '',
+        title,
+        text,
+        mapsUrl: mapsUrl || '',
+        proofUrl: proofUrl || '',
+        status: 'pending',
+        checks: {
+            hasProofUrl: /^https?:\/\//i.test(proofUrl || ''),
+            hasMapsCoords: hasCoords
+        },
+        coordinates: hasCoords ? coords : null,
+        createdAt: now,
+        createdByUid: user?.uid || null,
+        createdByEmail: user?.email || null
+    };
+
+    try {
+        await fb.db.ref('suggestions').push(payload);
+        localStorage.setItem(SUGGESTION_COOLDOWN_KEY, String(now));
+        setSuggestionStatus('Segnalazione inviata. Rimane in revisione fino ad approvazione admin.', true);
+        document.getElementById('suggestTitle').value = '';
+        document.getElementById('suggestText').value = '';
+        document.getElementById('suggestMaps').value = '';
+        document.getElementById('suggestProofUrl').value = '';
+        document.getElementById('suggestTeam').value = '';
+    } catch (error) {
+        setSuggestionStatus(`Errore invio: ${error.message}`);
+    }
+}
+
 window.registerDashboardUser = registerDashboardUser;
 window.loginDashboardUser = loginDashboardUser;
 window.logoutDashboardUser = logoutDashboardUser;
 window.removeDashboardEvent = removeDashboardEvent;
+window.submitUserSuggestion = submitUserSuggestion;
 
 loadLuoghiDb();
 Promise.all([loadNewsDb(), loadPaymentsDb()]).then(() => {

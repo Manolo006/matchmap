@@ -52,8 +52,10 @@
     </section>
 
     <nav class="page-tabs">
+        <a href="index.html" class="page-tab page-tab-link">Dashboard Home</a>
         <button type="button" class="page-tab active" data-page-target="newsPage">News</button>
         <button type="button" class="page-tab" data-page-target="luoghiPage">Luoghi</button>
+        <button type="button" class="page-tab" data-page-target="suggestionsPage">Segnalazioni</button>
     </nav>
 
     <section id="newsPage" class="publisher-page active">
@@ -114,6 +116,22 @@
             <div id="luoghiList" class="list"></div>
         </section>
 
+    </section>
+
+    <section id="suggestionsPage" class="publisher-page">
+        <section class="card">
+            <h2>Segnalazioni Utenti</h2>
+            <p class="muted">Review manuale: verifica fonte ufficiale e coerenza squadra/campo prima di approvare.</p>
+            <div class="actions">
+                <button id="suggestionsLoadBtn" type="button">Carica Segnalazioni</button>
+            </div>
+            <p id="suggestionsStatus" class="status"></p>
+        </section>
+        <section class="card">
+            <h2>Coda Revisione</h2>
+            <div id="suggestionsEmptyState" class="muted">Nessuna segnalazione in coda.</div>
+            <div id="suggestionsList" class="list"></div>
+        </section>
     </section>
 </main>
 
