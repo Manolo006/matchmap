@@ -34,6 +34,7 @@ let editNewsIndex = -1;
 let editLuogoIndex = -1;
 let geoResolveTimer = null;
 let lastGeoResolveKey = '';
+let luoghiSearchTerm = '';
 
 const regionInput = document.getElementById('regionInput');
 const titleInput = document.getElementById('titleInput');
@@ -58,6 +59,7 @@ const luogoSaveBtn = document.getElementById('luogoSaveBtn');
 const luogoClearBtn = document.getElementById('luogoClearBtn');
 const luoghiList = document.getElementById('luoghiList');
 const luoghiEmptyState = document.getElementById('luoghiEmptyState');
+const luoghiSearchInput = document.getElementById('luoghiSearchInput');
 const luoghiPublishBtn = document.getElementById('luoghiPublishBtn');
 const luoghiLoadBtn = document.getElementById('luoghiLoadBtn');
 const luoghiPreview = document.getElementById('luoghiPreview');
@@ -359,12 +361,38 @@ function renderLuoghiList() {
 
     if (!luoghiItems.length) {
         luoghiEmptyState.style.display = 'block';
+        luoghiEmptyState.textContent = 'Nessun luogo presente.';
+        return;
+    }
+
+    const q = normalizeText(luoghiSearchTerm);
+    const filteredLuoghi = luoghiItems
+        .map((item, index) => ({ item, index }))
+        .filter(({ item }) => {
+            if (!q) {
+                return true;
+            }
+            const searchable = normalizeText([
+                item.nome,
+                item.indirizzo,
+                item.mapsUrl,
+                item.logoUrl,
+                item.lat,
+                item.lng
+            ].filter(value => value !== null && value !== undefined).join(' '));
+            return searchable.includes(q);
+        });
+
+    if (!filteredLuoghi.length) {
+        luoghiEmptyState.style.display = 'block';
+        luoghiEmptyState.textContent = 'Nessun luogo trovato con questa ricerca.';
         return;
     }
 
     luoghiEmptyState.style.display = 'none';
+    luoghiEmptyState.textContent = 'Nessun luogo presente.';
 
-    luoghiItems.forEach((item, index) => {
+    filteredLuoghi.forEach(({ item, index }) => {
         const latNum = Number(item.lat);
         const lngNum = Number(item.lng);
         const hasCoords = Number.isFinite(latNum)
@@ -1311,6 +1339,12 @@ luogoMapsInput.addEventListener('input', scheduleAutoCoordinateResolve);
 luogoNomeInput.addEventListener('input', scheduleAutoResolveIfLinkPresent);
 luogoIndirizzoInput.addEventListener('input', scheduleAutoResolveIfLinkPresent);
 pasteCoordsBtn.addEventListener('click', pasteCoordinatesFromClipboard);
+if (luoghiSearchInput) {
+    luoghiSearchInput.addEventListener('input', event => {
+        luoghiSearchTerm = String(event.target?.value || '');
+        renderLuoghiList();
+    });
+}
 
 loginBtn.addEventListener('click', firebaseLogin);
 logoutBtn.addEventListener('click', firebaseLogout);

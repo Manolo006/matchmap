@@ -542,6 +542,12 @@ a:hover {
     background: rgba(59, 130, 246, 0.12);
 }
 
+#paymentsTable tbody tr.payments-empty-row td {
+    text-align: center;
+    color: var(--muted);
+    background: rgba(9, 18, 37, 0.55);
+}
+
 .event-remove-btn {
     min-width: 34px;
     min-height: 34px;
@@ -621,6 +627,8 @@ a:hover {
 
 #luoghiMap {
     height: clamp(280px, 52vh, 460px);
+    position: relative;
+    z-index: 1;
     border-radius: 18px;
     border: 1px solid rgba(159, 178, 221, 0.3);
     overflow: hidden;
@@ -632,6 +640,8 @@ a:hover {
     gap: 10px;
     margin: 6px 0 12px;
     align-items: center;
+    position: relative;
+    z-index: 1200;
 }
 
 .map-search-input-wrap {
@@ -639,6 +649,8 @@ a:hover {
     grid-template-columns: auto 1fr;
     align-items: center;
     gap: 8px;
+    position: relative;
+    z-index: 1201;
     padding: 0 12px;
     border-radius: 16px;
     border: 1px solid rgba(159, 178, 221, 0.35);
@@ -678,6 +690,54 @@ a:hover {
 .map-search-btn {
     min-height: 42px;
     white-space: nowrap;
+}
+
+.map-search-suggestions {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 1300;
+    border: 1px solid rgba(159, 178, 221, 0.38);
+    border-radius: 14px;
+    background: rgba(7, 14, 28, 0.98);
+    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+    display: grid;
+}
+
+.map-search-suggestion {
+    border: 0;
+    border-radius: 0;
+    border-bottom: 1px solid rgba(159, 178, 221, 0.18);
+    background: transparent;
+    color: var(--text);
+    text-align: left;
+    padding: 10px 12px;
+    display: grid;
+    gap: 2px;
+}
+
+.map-search-suggestion:last-child {
+    border-bottom: 0;
+}
+
+.map-search-suggestion.is-active,
+.map-search-suggestion:hover {
+    background: rgba(76, 201, 240, 0.16);
+    color: #eaf7ff;
+}
+
+.map-search-suggestion-title {
+    font-size: 0.92rem;
+    font-weight: 600;
+    line-height: 1.2;
+}
+
+.map-search-suggestion-meta {
+    font-size: 0.78rem;
+    line-height: 1.25;
+    color: #9fb2dd;
 }
 
 .leaflet-marker-icon.team-logo-marker {
@@ -1022,6 +1082,10 @@ a:hover {
     #paymentsTable td:nth-child(3)::before { content: "Fine febbraio"; }
     #paymentsTable td:nth-child(4)::before { content: "Riscontro chat"; }
     #paymentsTable td:nth-child(5)::before { content: "Stato"; }
+
+    #paymentsTable tbody tr.payments-empty-row td::before {
+        content: none;
+    }
 
     #paymentsTable tbody tr.pay-confirmed {
         border-color: rgba(110, 231, 183, 0.42);

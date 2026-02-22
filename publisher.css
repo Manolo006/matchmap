@@ -216,6 +216,10 @@ body {
     color-scheme: dark;
 }
 
+.luoghi-search-wrap {
+    margin-bottom: 10px;
+}
+
 input,
 textarea,
 select {

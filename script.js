@@ -14,6 +14,10 @@ let luoghiDb = [];
 let dashboardToastTimer = null;
 let luoghiMap = null;
 let luoghiMapLayer = null;
+let mapSearchSuggestions = [];
+let mapSearchActiveIndex = -1;
+let mapSearchHideTimer = null;
+let mapSearchLastEnterTs = 0;
 const TEAM_LOGO_FALLBACK_PATH = 'img/logo.png';
 const teamLogoUrlCache = new Map();
 const DASHBOARD_ADMIN_EMAILS = new Set(['manuelcarpita@gmail.com']);
@@ -28,6 +32,7 @@ async function loadLuoghiDb() {
                 const raw = snap.val();
                 luoghiDb = Array.isArray(raw) ? raw : Object.values(raw || {});
                 renderLuoghiMap();
+                renderMapSearchSuggestions();
                 return;
             }
         }
@@ -44,6 +49,25 @@ function normalizeText(value) {
         .replace(/[^a-z0-9\s]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function getQueryTokens(rawQuery, minLen = 2) {
+    return normalizeText(rawQuery)
+        .split(' ')
+        .filter(token => token.length >= minLen);
+}
+
+function buildLuogoSearchHaystack(entry) {
+    const nome = normalizeText(entry?.nome);
+    const comune = normalizeText(entry?.comune);
+    const indirizzo = normalizeText(entry?.indirizzo);
+    const maps = normalizeText(entry?.mapsUrl);
+    const aliases = (Array.isArray(entry?.aliases) ? entry.aliases : [])
+        .map(normalizeText)
+        .filter(Boolean);
+    return [nome, comune, indirizzo, maps, ...aliases]
+        .filter(Boolean)
+        .join(' ');
 }
 
 function getRegionLogoPath(regionName) {
@@ -159,6 +183,203 @@ function findLuogoDbMatch(rawLocation) {
         return null;
     }
     return bestMatch;
+}
+
+function findBestLuogoForMapSearch(rawQuery) {
+    const target = normalizeText(rawQuery);
+    if (!target) {
+        return null;
+    }
+
+    const tokens = getQueryTokens(rawQuery, 2);
+    const words = new Set(target.split(' ').filter(token => token.length >= 2));
+    let bestMatch = null;
+    let bestScore = 0;
+
+    luoghiDb.forEach(entry => {
+        const haystackText = buildLuogoSearchHaystack(entry);
+        if (!haystackText) {
+            return;
+        }
+        if (tokens.length > 1) {
+            const hasAllTokens = tokens.every(token => haystackText.includes(token));
+            if (!hasAllTokens) {
+                return;
+            }
+        }
+
+        const nome = normalizeText(entry?.nome);
+        const indirizzo = normalizeText(entry?.indirizzo);
+        const comune = normalizeText(entry?.comune);
+        const aliases = (Array.isArray(entry?.aliases) ? entry.aliases : [])
+            .map(normalizeText)
+            .filter(Boolean);
+        const haystack = [nome, indirizzo, comune, ...aliases].filter(Boolean);
+        if (!haystack.length) {
+            return;
+        }
+
+        let score = 0;
+        if (haystackText.includes(target)) {
+            score += 220;
+        }
+        haystack.forEach(value => {
+            if (value === target) {
+                score += 220;
+                return;
+            }
+            if (value.includes(target) || target.includes(value)) {
+                score += 95;
+            }
+        });
+
+        const candidateWords = new Set(haystack.join(' ').split(' ').filter(token => token.length >= 3));
+        let overlap = 0;
+        candidateWords.forEach(token => {
+            if (words.has(token)) overlap += 1;
+        });
+        score += overlap * 8;
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestMatch = entry;
+        }
+    });
+
+    if (bestScore < 24) {
+        return null;
+    }
+    return bestMatch;
+}
+
+function getLuogoSearchSuggestions(rawQuery, limit = 8) {
+    const target = normalizeText(rawQuery);
+    if (!target || target.length < 1) {
+        return [];
+    }
+
+    const words = getQueryTokens(rawQuery, 1);
+    const scored = luoghiDb.map(item => {
+        const haystackText = buildLuogoSearchHaystack(item);
+        if (!haystackText) {
+            return null;
+        }
+        if (words.length > 1) {
+            const hasAllTokens = words.every(token => haystackText.includes(token));
+            if (!hasAllTokens) {
+                return null;
+            }
+        }
+
+        const nome = normalizeText(item?.nome);
+        const comune = normalizeText(item?.comune);
+        const indirizzo = normalizeText(item?.indirizzo);
+        const aliases = (Array.isArray(item?.aliases) ? item.aliases : [])
+            .map(normalizeText)
+            .filter(Boolean);
+        const fields = [nome, comune, indirizzo, ...aliases].filter(Boolean);
+        if (!fields.length) {
+            return null;
+        }
+
+        let score = 0;
+        if (haystackText.includes(target)) {
+            score += 240;
+        }
+        fields.forEach(value => {
+            if (value === target) score += 250;
+            if (value.startsWith(target)) score += 140;
+            if (value.includes(target)) score += 90;
+            if (target.includes(value) && value.length >= 4) score += 48;
+        });
+
+        words.forEach(word => {
+            fields.forEach(value => {
+                if (value.includes(word)) {
+                    score += 10;
+                }
+            });
+        });
+
+        if (score <= 0) {
+            return null;
+        }
+
+        return {
+            item,
+            score
+        };
+    }).filter(Boolean);
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, limit).map(entry => entry.item);
+}
+
+function hideMapSearchSuggestions() {
+    const list = document.getElementById('mapQuickSearchSuggestions');
+    if (!list) {
+        return;
+    }
+    list.hidden = true;
+    list.innerHTML = '';
+    mapSearchSuggestions = [];
+    mapSearchActiveIndex = -1;
+}
+
+function renderMapSearchSuggestions() {
+    const input = document.getElementById('mapQuickSearchInput');
+    const list = document.getElementById('mapQuickSearchSuggestions');
+    if (!input || !list) {
+        return;
+    }
+
+    const query = String(input.value || '').trim();
+    mapSearchSuggestions = getLuogoSearchSuggestions(query);
+    mapSearchActiveIndex = mapSearchSuggestions.length ? 0 : -1;
+
+    if (!mapSearchSuggestions.length) {
+        hideMapSearchSuggestions();
+        return;
+    }
+
+    list.innerHTML = mapSearchSuggestions.map((item, index) => {
+        const title = String(item?.nome || 'Campo senza nome');
+        const details = [item?.comune, item?.indirizzo].filter(Boolean).join(' - ');
+        const isActive = index === mapSearchActiveIndex ? ' is-active' : '';
+        return `
+            <button type="button" class="map-search-suggestion${isActive}" data-index="${index}">
+                <span class="map-search-suggestion-title">${title}</span>
+                <span class="map-search-suggestion-meta">${details || 'Dettagli non disponibili'}</span>
+            </button>
+        `;
+    }).join('');
+    list.hidden = false;
+}
+
+function setMapSearchActiveIndex(index) {
+    const list = document.getElementById('mapQuickSearchSuggestions');
+    if (!list || !mapSearchSuggestions.length) {
+        return;
+    }
+    const nextIndex = Math.max(0, Math.min(index, mapSearchSuggestions.length - 1));
+    mapSearchActiveIndex = nextIndex;
+    list.querySelectorAll('.map-search-suggestion').forEach((el, currentIndex) => {
+        el.classList.toggle('is-active', currentIndex === nextIndex);
+    });
+}
+
+function selectMapSearchSuggestion(index) {
+    const selected = mapSearchSuggestions[index];
+    if (!selected) {
+        return false;
+    }
+    const input = document.getElementById('mapQuickSearchInput');
+    if (input) {
+        input.value = String(selected.nome || '').trim();
+    }
+    hideMapSearchSuggestions();
+    searchMapPlaceFromBar(selected);
+    return true;
 }
 
 function getMapsUrl(evento) {
@@ -928,6 +1149,14 @@ function renderPaymentsTable() {
         previsto: 'pay-planned'
     };
 
+    if (!paymentsDb.length) {
+        const row = document.createElement('tr');
+        row.className = 'payments-empty-row';
+        row.innerHTML = '<td colspan="5">Nessun aggiornamento pagamenti disponibile al momento.</td>';
+        tbody.appendChild(row);
+        return;
+    }
+
     paymentsDb.forEach(item => {
         const statusKey = normalizeText(item.stato);
         const row = document.createElement('tr');
@@ -1096,20 +1325,56 @@ function searchSuggestionPlace() {
     setSuggestionStatus('Ricerca aperta su Google Maps.', true);
 }
 
-function searchMapPlaceFromBar() {
+function searchMapPlaceFromBar(preselectedMatch = null) {
+    const notFoundMessage = 'campo non ancora inserito, se vuoi aggiungerlo fai una segnalazione nella sezione apposita sotto la mappa';
     const query = (document.getElementById('mapQuickSearchInput')?.value || '').trim();
     if (!query) {
         setSuggestionStatus('Inserisci campo/squadra/via nella barra sopra la mappa.');
         return;
     }
+    hideMapSearchSuggestions();
 
-    const searchUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
-    const suggestMapsEl = document.getElementById('suggestMaps');
-    if (suggestMapsEl && !suggestMapsEl.value.trim()) {
-        suggestMapsEl.value = searchUrl;
+    const trySearch = () => {
+        const bestMatch = preselectedMatch || findBestLuogoForMapSearch(query);
+        if (!bestMatch || !hasValidMapCoords(bestMatch?.lat, bestMatch?.lng)) {
+            setSuggestionStatus(notFoundMessage);
+            return;
+        }
+
+        const lat = getNumericCoord(bestMatch.lat);
+        const lng = getNumericCoord(bestMatch.lng);
+        ensureLuoghiMap();
+        if (luoghiMap) {
+            luoghiMap.setView([lat, lng], 16, { animate: true });
+            if (luoghiMapLayer && window.L) {
+                luoghiMapLayer.eachLayer(layer => {
+                    if (!(layer instanceof L.Marker)) {
+                        return;
+                    }
+                    const markerLatLng = layer.getLatLng();
+                    if (Math.abs(markerLatLng.lat - lat) < 0.000001 && Math.abs(markerLatLng.lng - lng) < 0.000001) {
+                        layer.openPopup();
+                    }
+                });
+            }
+        }
+
+        const suggestMapsEl = document.getElementById('suggestMaps');
+        if (suggestMapsEl && !suggestMapsEl.value.trim() && bestMatch.mapsUrl) {
+            suggestMapsEl.value = bestMatch.mapsUrl;
+        }
+
+        setSuggestionStatus(`Campo trovato: zoom su ${bestMatch.nome || query}.`, true);
+    };
+
+    if (!luoghiDb.length) {
+        loadLuoghiDb().finally(() => {
+            trySearch();
+        });
+        return;
     }
-    window.open(searchUrl, '_blank', 'noopener,noreferrer');
-    setSuggestionStatus('Ricerca aperta su Google Maps.', true);
+
+    trySearch();
 }
 
 async function submitUserSuggestion() {
@@ -1187,12 +1452,76 @@ window.searchSuggestionPlace = searchSuggestionPlace;
 window.searchMapPlaceFromBar = searchMapPlaceFromBar;
 
 const mapQuickSearchInput = document.getElementById('mapQuickSearchInput');
+const mapQuickSearchSuggestions = document.getElementById('mapQuickSearchSuggestions');
 if (mapQuickSearchInput) {
+    mapQuickSearchInput.addEventListener('input', () => {
+        renderMapSearchSuggestions();
+    });
+    mapQuickSearchInput.addEventListener('focus', () => {
+        if (mapSearchHideTimer) {
+            clearTimeout(mapSearchHideTimer);
+            mapSearchHideTimer = null;
+        }
+        renderMapSearchSuggestions();
+    });
+    mapQuickSearchInput.addEventListener('blur', () => {
+        mapSearchHideTimer = setTimeout(() => {
+            hideMapSearchSuggestions();
+        }, 120);
+    });
     mapQuickSearchInput.addEventListener('keydown', event => {
+        if (event.key === 'ArrowDown' && mapSearchSuggestions.length) {
+            event.preventDefault();
+            setMapSearchActiveIndex(mapSearchActiveIndex + 1);
+            return;
+        }
+        if (event.key === 'ArrowUp' && mapSearchSuggestions.length) {
+            event.preventDefault();
+            setMapSearchActiveIndex(mapSearchActiveIndex - 1);
+            return;
+        }
+        if (event.key === 'Escape') {
+            hideMapSearchSuggestions();
+            return;
+        }
         if (event.key === 'Enter') {
             event.preventDefault();
+            mapSearchLastEnterTs = Date.now();
+            if (mapSearchActiveIndex >= 0 && mapSearchSuggestions.length) {
+                selectMapSearchSuggestion(mapSearchActiveIndex);
+                return;
+            }
             searchMapPlaceFromBar();
         }
+    });
+    mapQuickSearchInput.addEventListener('keyup', event => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            if (Date.now() - mapSearchLastEnterTs < 220) {
+                return;
+            }
+            searchMapPlaceFromBar();
+        }
+    });
+}
+if (mapQuickSearchSuggestions) {
+    mapQuickSearchSuggestions.addEventListener('mousedown', event => {
+        event.preventDefault();
+    });
+    mapQuickSearchSuggestions.addEventListener('click', event => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+            return;
+        }
+        const button = target.closest('.map-search-suggestion');
+        if (!button) {
+            return;
+        }
+        const index = Number(button.dataset.index);
+        if (Number.isNaN(index)) {
+            return;
+        }
+        selectMapSearchSuggestion(index);
     });
 }
 
