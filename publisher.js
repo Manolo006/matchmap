@@ -50,8 +50,10 @@ const statusEl = document.getElementById('status');
 const luogoNomeInput = document.getElementById('luogoNomeInput');
 const luogoIndirizzoInput = document.getElementById('luogoIndirizzoInput');
 const luogoMapsInput = document.getElementById('luogoMapsInput');
+const luogoLogoInput = document.getElementById('luogoLogoInput');
 const luogoCoordsInput = document.getElementById('luogoCoordsInput');
 const pasteCoordsBtn = document.getElementById('pasteCoordsBtn');
+const luogoAutofillLogosBtn = document.getElementById('luogoAutofillLogosBtn');
 const luogoSaveBtn = document.getElementById('luogoSaveBtn');
 const luogoClearBtn = document.getElementById('luogoClearBtn');
 const luoghiList = document.getElementById('luoghiList');
@@ -64,6 +66,26 @@ const suggestionsLoadBtn = document.getElementById('suggestionsLoadBtn');
 const suggestionsStatusEl = document.getElementById('suggestionsStatus');
 const suggestionsEmptyState = document.getElementById('suggestionsEmptyState');
 const suggestionsList = document.getElementById('suggestionsList');
+const TUTTOCAMPO_TEAM_SEARCH_URL = 'https://www.tuttocampo.it/Ajax/GetTeams';
+const TUTTOCAMPO_DEFAULT_REGION = 'Lazio';
+const TUTTOCAMPO_LOGO_OVERRIDES = {
+    'leocon': 'https://www.tuttocampo.it/Lazio/TerzaCategoria/GironeARoma/Squadra/Leocon/1204237/Scheda',
+    'campo di cesano': 'https://www.tuttocampo.it/Lazio/PrimaCategoria/GironeC/Squadra/Cesano/1040338/Scheda',
+    'aurelia academy': 'https://www.tuttocampo.it/Lazio/GiovanissimiProvincialiU14/GironeUnicoViterbo/Squadra/AureliaAcademy/1290354/Scheda',
+    'campo di aranova': 'https://www.tuttocampo.it/Lazio/Eccellenza/GironeA/Squadra/Aranova/935549/Scheda',
+    'campo di santa marinella': 'https://www.tuttocampo.it/Lazio/Promozione/GironeA/Squadra/SantaMarinella1947/920919/Scheda',
+    'campo di pallidoro': 'https://www.tuttocampo.it/Lazio/Promozione/GironeA/Squadra/BorgoPalidoro/81212/Scheda',
+    'campo di bracciano': 'https://www.tuttocampo.it/Lazio/SecondaCategoria/GironeC/Squadra/VisBraccianoFC/931324/Scheda',
+    'campo di anguillara': 'https://www.tuttocampo.it/Lazio/PrimaCategoria/GironeC/Squadra/AnguillaraCalcio/79163/Scheda',
+    'san pio x': 'https://www.tuttocampo.it/Lazio/AllieviProvincialiU16/GironeUnicoViterbo/Squadra/SanPioX/1245004/Scheda',
+    'campo del oro': 'https://www.tuttocampo.it/Lazio/PrimaCategoria/GironeA/Squadra/QuartiereCampodellOro/1204238/Scheda',
+    'dlf civitavecchia': 'https://www.tuttocampo.it/Lazio/PrimaCategoria/GironeA/Squadra/DopolavoroFootballClub/1140172/Scheda',
+    'campo di ladispoli': 'https://www.tuttocampo.it/Lazio/Promozione/GironeA/Squadra/AcademyLadispoli/650008/Scheda',
+    'dm84 duencasette': 'https://www.tuttocampo.it/Lazio/PrimaCategoria/GironeA/Squadra/DM84Cerveteri/917262/Scheda',
+    'tarquinia': 'https://www.tuttocampo.it/Lazio/Promozione/GironeA/Squadra/TarquiniaCalcio/932915/Scheda',
+    'campo cerveteri': 'https://www.tuttocampo.it/Lazio/Promozione/GironeA/Squadra/CittadiCerveteri/77986/Scheda',
+    'club calcio passoscuro': 'https://www.tuttocampo.it/Lazio/PrimaCategoria/GironeC/Squadra/Passoscuro/80486/Scheda'
+};
 
 const loginEmail = document.getElementById('loginEmail');
 const loginPassword = document.getElementById('loginPassword');
@@ -192,6 +214,7 @@ function normalizeLuogo(item) {
         nome: String(pickFirst(raw, ['nome', 'Nome', 'name', 'Name'])).trim(),
         indirizzo: String(pickFirst(raw, ['indirizzo', 'Indirizzo', 'address', 'Address'])).trim(),
         mapsUrl: String(pickFirst(raw, ['mapsUrl', 'MapsUrl', 'mapsURL', 'maps', 'map', 'url', 'Url'])).trim(),
+        logoUrl: String(pickFirst(raw, ['logoUrl', 'LogoUrl', 'logoURL', 'logo', 'Logo'])).trim(),
         lat: Number.isFinite(lat) ? lat : null,
         lng: Number.isFinite(lng) ? lng : null,
         fatto: true
@@ -267,6 +290,7 @@ function resetLuogoForm() {
     luogoNomeInput.value = '';
     luogoIndirizzoInput.value = '';
     luogoMapsInput.value = '';
+    luogoLogoInput.value = '';
     luogoCoordsInput.value = '';
     lastGeoResolveKey = '';
     editLuogoIndex = -1;
@@ -294,6 +318,7 @@ function fillLuogoForm(index) {
     luogoNomeInput.value = item.nome;
     luogoIndirizzoInput.value = item.indirizzo;
     luogoMapsInput.value = item.mapsUrl;
+    luogoLogoInput.value = item.logoUrl || '';
     const latNum = Number(item.lat);
     const lngNum = Number(item.lng);
     luogoCoordsInput.value = (Number.isFinite(latNum) && Number.isFinite(lngNum))
@@ -354,6 +379,7 @@ function renderLuoghiList() {
             <h3>${item.nome}</h3>
             <div class="meta">${item.indirizzo || '-'}</div>
             <p class="item-pre"><strong>Maps:</strong> ${item.mapsUrl || '-'}</p>
+            <p class="item-pre"><strong>Logo squadra:</strong> ${item.logoUrl || '-'}</p>
             <p class="item-pre"><strong>Coordinate:</strong> ${item.lat ?? '-'}, ${item.lng ?? '-'}</p>
             <div class="item-actions">
                 <button type="button" data-action="edit-luogo" data-index="${index}">Modifica</button>
@@ -430,6 +456,7 @@ function validateLuogoForm() {
     const nome = luogoNomeInput.value.trim();
     const indirizzo = luogoIndirizzoInput.value.trim();
     const mapsUrl = luogoMapsInput.value.trim();
+    const logoUrl = luogoLogoInput.value.trim();
     const coordsText = luogoCoordsInput.value.trim();
     let lat = null;
     let lng = null;
@@ -460,7 +487,7 @@ function validateLuogoForm() {
         lng = Number.isFinite(existingLng) ? existingLng : null;
     }
 
-    return { nome, indirizzo, mapsUrl, lat, lng };
+    return { nome, indirizzo, mapsUrl, logoUrl, lat, lng };
 }
 
 function extractCoordinatesFromMapsUrl(url) {
@@ -501,6 +528,215 @@ function extractCoordinatesFromText(rawText) {
     return extractCoordinatesFromMapsUrl(text);
 }
 
+function hasManualCoordinatesInForm() {
+    const coordsText = luogoCoordsInput.value.trim();
+    const coords = extractCoordinatesFromText(coordsText);
+    return Boolean(coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng));
+}
+
+function stripHtmlTags(value) {
+    return String(value || '')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function buildTuttocampoTeamPageUrl(rawId) {
+    const path = String(rawId || '').trim().replace(/^\/+/, '');
+    if (!path) {
+        return '';
+    }
+    return `https://www.tuttocampo.it/${path}/Scheda`;
+}
+
+function cleanLuogoNameForTeamSearch(nome) {
+    return String(nome || '')
+        .replace(/^campo di\s+/i, '')
+        .replace(/^campo del\s+/i, '')
+        .replace(/^campo\s+/i, '')
+        .trim();
+}
+
+function scoreTuttocampoCandidate(candidate, searchValue, originalName) {
+    const display = stripHtmlTags(candidate?.text || '');
+    const candidateName = display.split('(')[0].trim();
+    const normCandidate = normalizeText(candidateName);
+    const normSearch = normalizeText(searchValue);
+    const normOriginal = normalizeText(originalName);
+    const typeLabel = String(candidate?.typeLabel || '');
+
+    let score = 0;
+    if (normCandidate && (normCandidate === normSearch || normCandidate === normOriginal)) {
+        score += 140;
+    }
+    if (normCandidate && normSearch && (normCandidate.includes(normSearch) || normSearch.includes(normCandidate))) {
+        score += 80;
+    }
+    if (normCandidate && normOriginal && (normCandidate.includes(normOriginal) || normOriginal.includes(normCandidate))) {
+        score += 60;
+    }
+    if (typeLabel === 'Dilettanti') {
+        score += 25;
+    }
+    if (/prima categoria|promozione|eccellenza|seconda categoria|terza categoria/i.test(display)) {
+        score += 12;
+    }
+    if (/calcio a 5/i.test(display)) {
+        score -= 80;
+    }
+    return score;
+}
+
+async function fetchTuttocampoTeamCandidates(searchValue, regionName = TUTTOCAMPO_DEFAULT_REGION) {
+    const query = String(searchValue || '').trim();
+    if (!query) {
+        return [];
+    }
+    const params = new URLSearchParams({
+        search_value: query,
+        region_name: regionName
+    });
+    const response = await fetch(`${TUTTOCAMPO_TEAM_SEARCH_URL}?${params.toString()}`, {
+        method: 'GET',
+        headers: {
+            Accept: 'application/json, text/javascript, */*; q=0.01',
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    });
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+    }
+
+    const payload = await response.json();
+    if (!Array.isArray(payload)) {
+        return [];
+    }
+
+    const items = [];
+    payload.forEach(group => {
+        const typeLabel = String(group?.text || '').trim();
+        const children = Array.isArray(group?.children) ? group.children : [];
+        children.forEach(child => {
+            const url = buildTuttocampoTeamPageUrl(child?.id);
+            if (url) {
+                items.push({
+                    ...child,
+                    typeLabel,
+                    url
+                });
+            }
+        });
+    });
+    return items;
+}
+
+async function resolveTuttocampoLogoUrlForLuogo(item) {
+    const originalName = String(item?.nome || '').trim();
+    const normalizedName = normalizeText(originalName);
+    if (!normalizedName) {
+        return '';
+    }
+
+    const override = TUTTOCAMPO_LOGO_OVERRIDES[normalizedName];
+    if (override) {
+        return override;
+    }
+
+    const searchValue = cleanLuogoNameForTeamSearch(originalName);
+    if (searchValue.length < 3) {
+        return '';
+    }
+
+    const candidates = await fetchTuttocampoTeamCandidates(searchValue, TUTTOCAMPO_DEFAULT_REGION);
+    if (!candidates.length) {
+        return '';
+    }
+
+    const ranked = candidates
+        .map(candidate => ({
+            candidate,
+            score: scoreTuttocampoCandidate(candidate, searchValue, originalName)
+        }))
+        .sort((a, b) => b.score - a.score);
+
+    if (!ranked.length || ranked[0].score < 95) {
+        return '';
+    }
+    return ranked[0].candidate.url;
+}
+
+async function autoFillMissingLuoghiLogos() {
+    if (!requirePublisherAdmin()) {
+        return;
+    }
+    if (!luoghiItems.length) {
+        setLuoghiStatus('Nessun luogo da analizzare.', 'err');
+        return;
+    }
+
+    if (luogoAutofillLogosBtn) {
+        luogoAutofillLogosBtn.disabled = true;
+    }
+
+    const missingIndexes = [];
+    luoghiItems.forEach((item, index) => {
+        if (!String(item?.logoUrl || '').trim()) {
+            missingIndexes.push(index);
+        }
+    });
+
+    if (!missingIndexes.length) {
+        if (luogoAutofillLogosBtn) {
+            luogoAutofillLogosBtn.disabled = false;
+        }
+        setLuoghiStatus('Tutti i luoghi hanno gia un logo squadra.', 'ok');
+        return;
+    }
+
+    let updated = 0;
+    const unresolved = [];
+    let hadNetworkErrors = false;
+    for (const index of missingIndexes) {
+        const item = luoghiItems[index];
+        const nome = String(item?.nome || '').trim() || `Luogo ${index + 1}`;
+        try {
+            const logoUrl = await resolveTuttocampoLogoUrlForLuogo(item);
+            if (logoUrl) {
+                luoghiItems[index].logoUrl = logoUrl;
+                updated += 1;
+            } else {
+                unresolved.push(nome);
+            }
+        } catch {
+            hadNetworkErrors = true;
+            unresolved.push(nome);
+        }
+    }
+
+    saveLuoghiDraft();
+    renderAll();
+    if (editLuogoIndex >= 0) {
+        fillLuogoForm(editLuogoIndex);
+    }
+
+    if (luogoAutofillLogosBtn) {
+        luogoAutofillLogosBtn.disabled = false;
+    }
+
+    if (!updated) {
+        const suffix = hadNetworkErrors ? ' Possibile blocco rete/CORS su Tuttocampo.' : '';
+        setLuoghiStatus(`Nessun logo trovato automaticamente. Verifica manuale per: ${unresolved.slice(0, 5).join(', ') || 'tutti i luoghi'}.${suffix}`, 'err');
+        return;
+    }
+
+    if (!unresolved.length) {
+        setLuoghiStatus(`Logo squadra compilato per ${updated} luoghi. Premi "Pubblica Luoghi" per salvare su Firebase.`, 'ok');
+        return;
+    }
+
+    setLuoghiStatus(`Logo squadra compilato per ${updated} luoghi. Da verificare: ${unresolved.slice(0, 5).join(', ')}. Poi premi "Pubblica Luoghi".`, 'ok');
+}
+
 async function geocodeCoordinatesByText(query) {
     const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=it&q=${encodeURIComponent(query)}`;
     const response = await fetch(url, {
@@ -523,6 +759,10 @@ async function geocodeCoordinatesByText(query) {
 }
 
 async function autoResolveCoordinatesFromLink() {
+    if (hasManualCoordinatesInForm()) {
+        return;
+    }
+
     const mapsUrl = luogoMapsInput.value.trim();
     if (!mapsUrl) {
         return;
@@ -570,6 +810,10 @@ async function autoResolveCoordinatesFromLink() {
 }
 
 function scheduleAutoCoordinateResolve() {
+    if (hasManualCoordinatesInForm()) {
+        return;
+    }
+
     const mapsUrl = luogoMapsInput.value.trim();
     if (!mapsUrl) {
         return;
@@ -1058,6 +1302,9 @@ loadRemoteBtn.addEventListener('click', () => loadNewsFromFirebase(false));
 
 luogoSaveBtn.addEventListener('click', handleSaveLuogo);
 luogoClearBtn.addEventListener('click', resetLuogoForm);
+if (luogoAutofillLogosBtn) {
+    luogoAutofillLogosBtn.addEventListener('click', autoFillMissingLuoghiLogos);
+}
 luoghiPublishBtn.addEventListener('click', publishLuoghiFirebase);
 luoghiLoadBtn.addEventListener('click', () => loadLuoghiFromFirebase(false));
 luogoMapsInput.addEventListener('input', scheduleAutoCoordinateResolve);

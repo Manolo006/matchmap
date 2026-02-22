@@ -14,6 +14,8 @@ let luoghiDb = [];
 let dashboardToastTimer = null;
 let luoghiMap = null;
 let luoghiMapLayer = null;
+const TEAM_LOGO_FALLBACK_PATH = 'img/logo.png';
+const teamLogoUrlCache = new Map();
 const DASHBOARD_ADMIN_EMAILS = new Set(['manuelcarpita@gmail.com']);
 const AUTO_FIELD_SUGGESTIONS_CACHE_KEY = 'matchmap_auto_field_suggestions_v1';
 
@@ -55,7 +57,6 @@ function getRegionLogoPath(regionName) {
         'basilicata': 'img/basilicata.png',
         'calabria': 'img/calabria.png',
         'campania': 'img/campania.png',
-        // file locale presente come "emilia_romania.png"
         'emilia romagna': 'img/emilia_romania.png',
         'friuli venezia giulia': 'img/friuli.png',
         'lazio': 'img/lazio.png',
@@ -175,6 +176,125 @@ function getNumericCoord(value) {
     return Number.isFinite(num) ? num : null;
 }
 
+function toTeamLogoSlug(value) {
+    return normalizeText(value).replace(/\s+/g, '-');
+}
+
+function canLoadImage(url) {
+    return new Promise(resolve => {
+        const img = new Image();
+        img.onload = () => resolve(true);
+        img.onerror = () => resolve(false);
+        img.src = url;
+    });
+}
+
+function extractTuttocampoTeamId(url) {
+    const value = String(url || '').trim();
+    if (!value) {
+        return '';
+    }
+    const match = value.match(/\/Squadra\/[^/]+\/(\d+)(?:\/|$|\?)/i);
+    return match ? match[1] : '';
+}
+
+function buildTuttocampoLogoCandidates(rawUrl) {
+    const value = String(rawUrl || '').trim();
+    const lower = value.toLowerCase();
+    const isTuttocampoPage = lower.includes('tuttocampo.it') && lower.includes('/squadra/');
+    if (!isTuttocampoPage) {
+        return [];
+    }
+    const teamId = extractTuttocampoTeamId(value);
+    if (!teamId) {
+        return [];
+    }
+    return [
+        `https://b-content.tuttocampo.it/Teams/200/${teamId}.png?v=1`,
+        `https://b-content.tuttocampo.it/Teams/Original/${teamId}.png?v=1`
+    ];
+}
+
+async function resolveTeamLogoUrl(item) {
+    const explicitUrl = String(item?.logoUrl || item?.logo || '').trim();
+    const teamName = String(item?.team || item?.nome || '').trim();
+    const slug = toTeamLogoSlug(teamName);
+    const cacheKey = `${explicitUrl}|${slug}`;
+    if (teamLogoUrlCache.has(cacheKey)) {
+        return teamLogoUrlCache.get(cacheKey);
+    }
+
+    const candidates = [];
+    if (explicitUrl) {
+        const tuttocampoCandidates = buildTuttocampoLogoCandidates(explicitUrl);
+        if (tuttocampoCandidates.length) {
+            candidates.push(...tuttocampoCandidates);
+        } else {
+            candidates.push(explicitUrl);
+        }
+    }
+    if (slug) {
+        candidates.push(`img/teams/${slug}.png`);
+        candidates.push(`img/teams/${slug}.webp`);
+        candidates.push(`img/teams/${slug}.jpg`);
+        candidates.push(`img/teams/${slug}.jpeg`);
+    }
+    candidates.push(TEAM_LOGO_FALLBACK_PATH);
+
+    for (const url of candidates) {
+        // usa il primo logo raggiungibile, altrimenti fallback logo app
+        const exists = await canLoadImage(url);
+        if (exists) {
+            teamLogoUrlCache.set(cacheKey, url);
+            return url;
+        }
+    }
+
+    teamLogoUrlCache.set(cacheKey, TEAM_LOGO_FALLBACK_PATH);
+    return TEAM_LOGO_FALLBACK_PATH;
+}
+
+async function resolveTeamLogoUrls(item) {
+    const explicitRaw = String(item?.logoUrl || item?.logo || '').trim();
+    const explicitParts = explicitRaw
+        .split(/[,;\n]+/)
+        .map(x => x.trim())
+        .filter(Boolean);
+
+    const resolved = [];
+    if (explicitParts.length) {
+        for (const part of explicitParts) {
+            const single = await resolveTeamLogoUrl({ ...item, logoUrl: part });
+            if (single && !resolved.includes(single)) {
+                resolved.push(single);
+            }
+            if (resolved.length >= 3) {
+                break;
+            }
+        }
+    }
+
+    if (!resolved.length) {
+        resolved.push(await resolveTeamLogoUrl(item));
+    }
+
+    if (!resolved.length) {
+        resolved.push(TEAM_LOGO_FALLBACK_PATH);
+    }
+    return resolved.slice(0, 3);
+}
+
+function buildTeamLogoStackMarkerHtml(urls) {
+    const safeUrls = (Array.isArray(urls) ? urls : [])
+        .map(x => String(x || '').replace(/"/g, '&quot;'))
+        .filter(Boolean)
+        .slice(0, 3);
+    const slots = safeUrls.map((url, index) => {
+        return `<img src="${url}" alt="Logo squadra ${index + 1}" loading="lazy" decoding="async">`;
+    }).join('');
+    return `<div class="team-logo-stack ${safeUrls.length > 1 ? 'is-multi' : 'is-single'}">${slots}</div>`;
+}
+
 function hasValidMapCoords(latValue, lngValue) {
     const lat = getNumericCoord(latValue);
     const lng = getNumericCoord(lngValue);
@@ -204,7 +324,7 @@ function ensureLuoghiMap() {
     luoghiMapLayer = L.layerGroup().addTo(luoghiMap);
 }
 
-function renderLuoghiMap() {
+async function renderLuoghiMap() {
     ensureLuoghiMap();
     const summaryEl = document.getElementById('mapSummary');
     const missingEl = document.getElementById('missingCoordsList');
@@ -231,20 +351,20 @@ function renderLuoghiMap() {
     }
     luoghiMapLayer.clearLayers();
 
-    const markerIcon = L.icon({
-        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
-        shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-        iconSize: [25, 41],
-        iconAnchor: [12, 41],
-        popupAnchor: [1, -34],
-        shadowSize: [41, 41]
-    });
-
     const bounds = [];
-    completed.forEach(item => {
+    const logoUrlSets = await Promise.all(completed.map(item => resolveTeamLogoUrls(item)));
+    completed.forEach((item, index) => {
         const lat = getNumericCoord(item.lat);
         const lng = getNumericCoord(item.lng);
-        const marker = L.marker([lat, lng], { icon: markerIcon });
+        const logoUrls = logoUrlSets[index] || [TEAM_LOGO_FALLBACK_PATH];
+        const teamLogoIcon = L.divIcon({
+            html: buildTeamLogoStackMarkerHtml(logoUrls),
+            className: 'team-logo-stack-marker',
+            iconSize: [56, 56],
+            iconAnchor: [28, 28],
+            popupAnchor: [0, -22]
+        });
+        const marker = L.marker([lat, lng], { icon: teamLogoIcon });
         const mapsLink = item.mapsUrl ? `<p><a href="${item.mapsUrl}" target="_blank">Apri Maps</a></p>` : '';
         marker.bindPopup(`<strong>${item.nome || 'Campo'}</strong><br>${item.comune || ''}<br>${item.indirizzo || ''}${mapsLink}`);
         marker.addTo(luoghiMapLayer);
@@ -406,6 +526,10 @@ async function autoSuggestFieldFromDesignazione(evento) {
     const coords = extractCoordinatesFromMapsUrl(mapsCandidateUrl);
     const hasCoords = Boolean(coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng));
     const user = getCurrentDashboardUser();
+    if (!user) {
+        showDashboardToast('Segnalazione automatica bloccata: registrati o effettua il login.', 'err');
+        return;
+    }
 
     const payload = {
         type: 'campo',
@@ -947,6 +1071,47 @@ function extractCoordinatesFromMapsUrl(url) {
     return null;
 }
 
+function searchSuggestionPlace() {
+    const team = (document.getElementById('suggestTeam')?.value || '').trim();
+    const title = (document.getElementById('suggestTitle')?.value || '').trim();
+    const text = (document.getElementById('suggestText')?.value || '').trim();
+    const mapsUrl = (document.getElementById('suggestMaps')?.value || '').trim();
+
+    if (/^https?:\/\//i.test(mapsUrl)) {
+        window.open(mapsUrl, '_blank', 'noopener,noreferrer');
+        setSuggestionStatus('Apro il link Maps inserito.', true);
+        return;
+    }
+
+    const queryParts = [team, title, text, 'Italia'].filter(Boolean);
+    if (!queryParts.length) {
+        setSuggestionStatus('Compila almeno squadra, titolo o descrizione per avviare la ricerca.');
+        return;
+    }
+
+    const query = queryParts.join(', ');
+    const searchUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    document.getElementById('suggestMaps').value = searchUrl;
+    window.open(searchUrl, '_blank', 'noopener,noreferrer');
+    setSuggestionStatus('Ricerca aperta su Google Maps.', true);
+}
+
+function searchMapPlaceFromBar() {
+    const query = (document.getElementById('mapQuickSearchInput')?.value || '').trim();
+    if (!query) {
+        setSuggestionStatus('Inserisci campo/squadra/via nella barra sopra la mappa.');
+        return;
+    }
+
+    const searchUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+    const suggestMapsEl = document.getElementById('suggestMaps');
+    if (suggestMapsEl && !suggestMapsEl.value.trim()) {
+        suggestMapsEl.value = searchUrl;
+    }
+    window.open(searchUrl, '_blank', 'noopener,noreferrer');
+    setSuggestionStatus('Ricerca aperta su Google Maps.', true);
+}
+
 async function submitUserSuggestion() {
     const fb = window.matchMapFirebase;
     if (!fb?.ready || !fb.db) {
@@ -976,6 +1141,10 @@ async function submitUserSuggestion() {
     const coords = extractCoordinatesFromMapsUrl(mapsUrl);
     const hasCoords = Boolean(coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng));
     const user = getCurrentDashboardUser();
+    if (!user) {
+        setSuggestionStatus('Per inviare segnalazioni devi essere registrato e fare login.');
+        return;
+    }
 
     const payload = {
         type,
@@ -1014,6 +1183,18 @@ window.loginDashboardUser = loginDashboardUser;
 window.logoutDashboardUser = logoutDashboardUser;
 window.removeDashboardEvent = removeDashboardEvent;
 window.submitUserSuggestion = submitUserSuggestion;
+window.searchSuggestionPlace = searchSuggestionPlace;
+window.searchMapPlaceFromBar = searchMapPlaceFromBar;
+
+const mapQuickSearchInput = document.getElementById('mapQuickSearchInput');
+if (mapQuickSearchInput) {
+    mapQuickSearchInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            searchMapPlaceFromBar();
+        }
+    });
+}
 
 loadLuoghiDb();
 Promise.all([loadNewsDb(), loadPaymentsDb()]).then(() => {

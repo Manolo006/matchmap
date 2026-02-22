@@ -626,6 +626,110 @@ a:hover {
     overflow: hidden;
 }
 
+.map-search-bar {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    margin: 6px 0 12px;
+    align-items: center;
+}
+
+.map-search-input-wrap {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    border-radius: 16px;
+    border: 1px solid rgba(159, 178, 221, 0.35);
+    background: rgba(9, 18, 37, 0.9);
+}
+
+.map-search-icon {
+    width: 18px;
+    height: 18px;
+    color: #9fdcff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.map-search-icon svg {
+    width: 100%;
+    height: 100%;
+    fill: currentColor;
+}
+
+#mapQuickSearchInput {
+    width: 100%;
+    min-height: 42px;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.95rem;
+}
+
+#mapQuickSearchInput::placeholder {
+    color: #9fb2dd;
+}
+
+.map-search-btn {
+    min-height: 42px;
+    white-space: nowrap;
+}
+
+.leaflet-marker-icon.team-logo-marker {
+    border-radius: 999px;
+    border: 2px solid rgba(12, 22, 44, 0.9);
+    background: #ffffff;
+    object-fit: cover;
+    box-shadow: 0 6px 14px rgba(6, 10, 18, 0.35);
+}
+
+.team-logo-stack-marker {
+    background: transparent !important;
+    border: 0 !important;
+}
+
+.team-logo-stack {
+    position: relative;
+    width: 56px;
+    height: 56px;
+}
+
+.team-logo-stack img {
+    position: absolute;
+    width: 38px;
+    height: 38px;
+    border-radius: 999px;
+    border: 2px solid rgba(12, 22, 44, 0.9);
+    background: #ffffff;
+    object-fit: cover;
+    box-shadow: 0 6px 14px rgba(6, 10, 18, 0.35);
+}
+
+.team-logo-stack.is-single img:nth-child(1) {
+    left: 9px;
+    top: 9px;
+}
+
+.team-logo-stack.is-multi img:nth-child(1) {
+    left: 0;
+    top: 10px;
+}
+
+.team-logo-stack.is-multi img:nth-child(2) {
+    left: 18px;
+    top: 10px;
+}
+
+.team-logo-stack.is-multi img:nth-child(3) {
+    left: 9px;
+    top: -1px;
+}
+
 #missingCoordsList {
     margin-top: 12px;
 }
@@ -730,6 +834,16 @@ a:hover {
         width: 100%;
         min-height: 44px;
         font-size: 0.98rem;
+    }
+
+    .map-search-bar {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+
+    .map-search-btn {
+        width: 100%;
+        min-height: 44px;
     }
 
     .panel {
@@ -855,5 +969,72 @@ a:hover {
         right: 10px;
         left: 10px;
         max-width: none;
+    }
+
+    /* Pagamenti: su mobile mostra card verticali con etichette */
+    #paymentsTable {
+        min-width: 0;
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+    #paymentsTable thead {
+        display: none;
+    }
+
+    #paymentsTable tbody,
+    #paymentsTable tr,
+    #paymentsTable td {
+        display: block;
+        width: 100%;
+    }
+
+    #paymentsTable tbody tr {
+        margin-bottom: 10px;
+        padding: 10px;
+        border: 1px solid rgba(159, 178, 221, 0.18);
+        border-radius: 14px;
+        background: rgba(9, 18, 37, 0.55);
+    }
+
+    #paymentsTable td {
+        border: 0;
+        padding: 5px 0;
+        white-space: normal;
+        font-size: 0.88rem;
+        line-height: 1.3;
+        background: transparent !important;
+    }
+
+    #paymentsTable td::before {
+        display: block;
+        color: #bcd5ff;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        margin-bottom: 2px;
+    }
+
+    #paymentsTable td:nth-child(1)::before { content: "Regione"; }
+    #paymentsTable td:nth-child(2)::before { content: "Pacchi in pagamento"; }
+    #paymentsTable td:nth-child(3)::before { content: "Fine febbraio"; }
+    #paymentsTable td:nth-child(4)::before { content: "Riscontro chat"; }
+    #paymentsTable td:nth-child(5)::before { content: "Stato"; }
+
+    #paymentsTable tbody tr.pay-confirmed {
+        border-color: rgba(110, 231, 183, 0.42);
+        background: linear-gradient(145deg, rgba(8, 30, 24, 0.75), rgba(8, 18, 34, 0.72));
+    }
+
+    #paymentsTable tbody tr.pay-monitoring {
+        border-color: rgba(251, 191, 36, 0.45);
+        background: linear-gradient(145deg, rgba(44, 30, 8, 0.72), rgba(8, 18, 34, 0.72));
+    }
+
+    #paymentsTable tbody tr.pay-planned {
+        border-color: rgba(147, 197, 253, 0.42);
+        background: linear-gradient(145deg, rgba(8, 24, 44, 0.72), rgba(8, 18, 34, 0.72));
     }
 }

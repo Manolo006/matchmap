@@ -127,6 +127,17 @@
     <section id="map" class="tab-content">
         <div class="panel">
             <h2>Mappa Campi Completati</h2>
+            <div class="map-search-bar">
+                <div class="map-search-input-wrap">
+                    <span class="map-search-icon" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" focusable="false">
+                            <path d="M10.5 3a7.5 7.5 0 0 1 5.96 12.04l4.25 4.25a1 1 0 0 1-1.42 1.42l-4.25-4.25A7.5 7.5 0 1 1 10.5 3Zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Z"></path>
+                        </svg>
+                    </span>
+                    <input id="mapQuickSearchInput" type="text" placeholder="campo/squadra/via" autocomplete="off">
+                </div>
+                <button class="primary-btn map-search-btn" type="button" onclick="searchMapPlaceFromBar()">Cerca</button>
+            </div>
             <div id="luoghiMap"></div>
             <p id="mapSummary" class="auth-status"></p>
             <div id="missingCoordsList" class="news-item"></div>
