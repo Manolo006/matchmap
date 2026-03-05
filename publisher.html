@@ -54,6 +54,7 @@
     <nav class="page-tabs">
         <a href="index.html" class="page-tab page-tab-link">Dashboard Home</a>
         <button type="button" class="page-tab active" data-page-target="newsPage">News</button>
+        <button type="button" class="page-tab" data-page-target="paymentsPage">Pagamenti</button>
         <button type="button" class="page-tab" data-page-target="luoghiPage">Luoghi</button>
         <button type="button" class="page-tab" data-page-target="suggestionsPage">Segnalazioni</button>
     </nav>
@@ -85,6 +86,38 @@
             <div id="newsList" class="list"></div>
         </section>
 
+    </section>
+
+    <section id="paymentsPage" class="publisher-page">
+        <section class="card">
+            <h2>Pagamenti (Modalita Foglio)</h2>
+            <p class="muted">Modifica direttamente le celle come in un foglio Excel, poi premi Pubblica Pagamenti.</p>
+            <div class="actions actions-split">
+                <div class="actions actions-inline">
+                    <button id="paymentsAddRowBtn" class="primary" type="button">Aggiungi Riga</button>
+                    <button id="paymentsDeleteRowBtn" type="button">Elimina Riga Selezionata</button>
+                </div>
+                <div class="actions actions-inline actions-right">
+                    <button id="paymentsPublishBtn" type="button">Pubblica Pagamenti</button>
+                    <button id="paymentsLoadBtn" type="button">Carica Pagamenti</button>
+                </div>
+            </div>
+            <p id="paymentsStatus" class="status"></p>
+            <div class="sheet-wrap">
+                <table id="paymentsSheet" class="sheet-table">
+                    <thead>
+                        <tr>
+                            <th contenteditable="true" data-colkey="regione" spellcheck="false">Regione</th>
+                            <th contenteditable="true" data-colkey="inPagamento" spellcheck="false">Pacchi in pagamento</th>
+                            <th contenteditable="true" data-colkey="fineFebbraio" spellcheck="false">Fine febbraio</th>
+                            <th contenteditable="true" data-colkey="chat" spellcheck="false">Riscontro chat</th>
+                            <th contenteditable="true" data-colkey="stato" spellcheck="false">Stato</th>
+                        </tr>
+                    </thead>
+                    <tbody id="paymentsSheetBody"></tbody>
+                </table>
+            </div>
+        </section>
     </section>
 
     <section id="luoghiPage" class="publisher-page">

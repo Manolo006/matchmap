@@ -1,5 +1,6 @@
 const NEWS_DRAFT_KEY = 'matchmap_publisher_news_draft_v2';
 const LUOGHI_DRAFT_KEY = 'matchmap_publisher_luoghi_draft_v1';
+const PAYMENTS_DRAFT_KEY = 'matchmap_publisher_payments_draft_v1';
 const ADMIN_EMAILS = new Set(['manuelcarpita@gmail.com']);
 const ADMIN_UIDS = new Set([]);
 
@@ -29,12 +30,21 @@ const ITALIAN_REGIONS = [
 
 let newsItems = [];
 let luoghiItems = [];
+let paymentsItems = [];
+let paymentsColumns = {
+    regione: 'Regione',
+    inPagamento: 'Pacchi in pagamento',
+    fineFebbraio: 'Fine febbraio',
+    chat: 'Riscontro chat',
+    stato: 'Stato'
+};
 let suggestionItems = [];
 let editNewsIndex = -1;
 let editLuogoIndex = -1;
 let geoResolveTimer = null;
 let lastGeoResolveKey = '';
 let luoghiSearchTerm = '';
+let paymentsSelectedRowIndex = -1;
 
 const regionInput = document.getElementById('regionInput');
 const titleInput = document.getElementById('titleInput');
@@ -64,6 +74,12 @@ const luoghiPublishBtn = document.getElementById('luoghiPublishBtn');
 const luoghiLoadBtn = document.getElementById('luoghiLoadBtn');
 const luoghiPreview = document.getElementById('luoghiPreview');
 const luoghiStatusEl = document.getElementById('luoghiStatus');
+const paymentsSheetBody = document.getElementById('paymentsSheetBody');
+const paymentsAddRowBtn = document.getElementById('paymentsAddRowBtn');
+const paymentsDeleteRowBtn = document.getElementById('paymentsDeleteRowBtn');
+const paymentsPublishBtn = document.getElementById('paymentsPublishBtn');
+const paymentsLoadBtn = document.getElementById('paymentsLoadBtn');
+const paymentsStatusEl = document.getElementById('paymentsStatus');
 const suggestionsLoadBtn = document.getElementById('suggestionsLoadBtn');
 const suggestionsStatusEl = document.getElementById('suggestionsStatus');
 const suggestionsEmptyState = document.getElementById('suggestionsEmptyState');
@@ -108,6 +124,14 @@ function setStatus(message, type = '') {
 function setLuoghiStatus(message, type = '') {
     luoghiStatusEl.textContent = message;
     luoghiStatusEl.className = `status ${type}`.trim();
+}
+
+function setPaymentsStatus(message, type = '') {
+    if (!paymentsStatusEl) {
+        return;
+    }
+    paymentsStatusEl.textContent = message;
+    paymentsStatusEl.className = `status ${type}`.trim();
 }
 
 function setSuggestionsStatus(message, type = '') {
@@ -165,6 +189,7 @@ function requirePublisherAdmin() {
     if (!isAdmin) {
         setStatus('Accesso negato: solo admin autorizzato.', 'err');
         setLuoghiStatus('Accesso negato: solo admin autorizzato.', 'err');
+        setPaymentsStatus('Accesso negato: solo admin autorizzato.', 'err');
     }
     return isAdmin;
 }
@@ -223,6 +248,53 @@ function normalizeLuogo(item) {
     };
 }
 
+function normalizePayment(item) {
+    return {
+        regione: String(item?.regione || '').trim(),
+        inPagamento: String(item?.inPagamento || '').trim(),
+        fineFebbraio: String(item?.fineFebbraio || '').trim(),
+        chat: String(item?.chat || '').trim(),
+        stato: String(item?.stato || '').trim()
+    };
+}
+
+function createEmptyPaymentRow() {
+    return normalizePayment({
+        regione: '',
+        inPagamento: '',
+        fineFebbraio: '',
+        chat: '',
+        stato: ''
+    });
+}
+
+function normalizePaymentColumns(value) {
+    const fallback = {
+        regione: 'Regione',
+        inPagamento: 'Pacchi in pagamento',
+        fineFebbraio: 'Fine febbraio',
+        chat: 'Riscontro chat',
+        stato: 'Stato'
+    };
+    const raw = value || {};
+    return {
+        regione: String(raw.regione || fallback.regione).trim() || fallback.regione,
+        inPagamento: String(raw.inPagamento || fallback.inPagamento).trim() || fallback.inPagamento,
+        fineFebbraio: String(raw.fineFebbraio || fallback.fineFebbraio).trim() || fallback.fineFebbraio,
+        chat: String(raw.chat || fallback.chat).trim() || fallback.chat,
+        stato: String(raw.stato || fallback.stato).trim() || fallback.stato
+    };
+}
+
+function getPaymentsForPublish() {
+    return paymentsItems
+        .map(normalizePayment)
+        .filter(item => {
+            return [item.regione, item.inPagamento, item.fineFebbraio, item.chat, item.stato]
+                .some(value => String(value || '').trim() !== '');
+        });
+}
+
 function normalizeSuggestion(item, key) {
     const raw = item || {};
     return {
@@ -250,6 +322,13 @@ function saveLuoghiDraft() {
     localStorage.setItem(LUOGHI_DRAFT_KEY, JSON.stringify(luoghiItems));
 }
 
+function savePaymentsDraft() {
+    localStorage.setItem(PAYMENTS_DRAFT_KEY, JSON.stringify({
+        columns: normalizePaymentColumns(paymentsColumns),
+        items: paymentsItems.map(normalizePayment)
+    }));
+}
+
 function restoreDrafts() {
     try {
         const rawNews = JSON.parse(localStorage.getItem(NEWS_DRAFT_KEY) || '[]');
@@ -263,6 +342,22 @@ function restoreDrafts() {
         luoghiItems = Array.isArray(rawLuoghi) ? rawLuoghi.map(normalizeLuogo) : [];
     } catch {
         luoghiItems = [];
+    }
+
+    try {
+        const rawPayments = JSON.parse(localStorage.getItem(PAYMENTS_DRAFT_KEY) || '[]');
+        if (Array.isArray(rawPayments)) {
+            paymentsItems = rawPayments.map(normalizePayment);
+            paymentsColumns = normalizePaymentColumns({});
+        } else {
+            paymentsItems = Array.isArray(rawPayments?.items)
+                ? rawPayments.items.map(normalizePayment)
+                : [];
+            paymentsColumns = normalizePaymentColumns(rawPayments?.columns);
+        }
+    } catch {
+        paymentsItems = [];
+        paymentsColumns = normalizePaymentColumns({});
     }
 }
 
@@ -419,11 +514,58 @@ function renderLuoghiList() {
     });
 }
 
+function renderPaymentsSheet() {
+    if (!paymentsSheetBody) {
+        return;
+    }
+    const tableHeadCells = document.querySelectorAll('#paymentsSheet thead th[data-colkey]');
+    tableHeadCells.forEach(cell => {
+        const key = String(cell.dataset.colkey || '').trim();
+        if (!key) {
+            return;
+        }
+        cell.textContent = paymentsColumns[key] || cell.textContent || '';
+    });
+
+    paymentsSheetBody.innerHTML = '';
+
+    if (!paymentsItems.length) {
+        paymentsItems.push(createEmptyPaymentRow());
+    }
+
+    paymentsItems.forEach((item, index) => {
+        const row = document.createElement('tr');
+        row.dataset.index = String(index);
+        row.innerHTML = `
+            <td contenteditable="true" data-field="regione">${item.regione || ''}</td>
+            <td contenteditable="true" data-field="inPagamento">${item.inPagamento || ''}</td>
+            <td contenteditable="true" data-field="fineFebbraio">${item.fineFebbraio || ''}</td>
+            <td contenteditable="true" data-field="chat">${item.chat || ''}</td>
+            <td contenteditable="true" data-field="stato">${item.stato || ''}</td>
+        `;
+        paymentsSheetBody.appendChild(row);
+    });
+
+    refreshPaymentsSelectedRowUI();
+}
+
+function refreshPaymentsSelectedRowUI() {
+    if (!paymentsSheetBody) {
+        return;
+    }
+    const rows = paymentsSheetBody.querySelectorAll('tr');
+    rows.forEach(row => {
+        const index = Number(row.dataset.index);
+        row.classList.toggle('is-selected', index === paymentsSelectedRowIndex);
+    });
+}
+
 function renderAll() {
     renderNewsList();
     renderNewsPreview();
     renderLuoghiList();
     renderLuoghiPreview();
+    renderPaymentsSheet();
     renderSuggestionsList();
 }
 
@@ -516,6 +658,32 @@ function validateLuogoForm() {
     }
 
     return { nome, indirizzo, mapsUrl, logoUrl, lat, lng };
+}
+
+function addPaymentRow() {
+    if (!requirePublisherAdmin()) {
+        return;
+    }
+    paymentsItems.push(createEmptyPaymentRow());
+    paymentsSelectedRowIndex = paymentsItems.length - 1;
+    savePaymentsDraft();
+    renderPaymentsSheet();
+    setPaymentsStatus('Riga aggiunta. Modifica le celle direttamente.', 'ok');
+}
+
+function deleteSelectedPaymentRow() {
+    if (!requirePublisherAdmin()) {
+        return;
+    }
+    if (paymentsSelectedRowIndex < 0 || paymentsSelectedRowIndex >= paymentsItems.length) {
+        setPaymentsStatus('Seleziona una riga da eliminare.', 'err');
+        return;
+    }
+    paymentsItems.splice(paymentsSelectedRowIndex, 1);
+    paymentsSelectedRowIndex = -1;
+    savePaymentsDraft();
+    renderPaymentsSheet();
+    setPaymentsStatus('Riga eliminata.', 'ok');
 }
 
 function extractCoordinatesFromMapsUrl(url) {
@@ -1052,10 +1220,12 @@ async function firebaseLogin() {
         await fb.auth.signInWithEmailAndPassword(email, password);
         setStatus('Login Firebase effettuato.', 'ok');
         setLuoghiStatus('Login Firebase effettuato.', 'ok');
+        setPaymentsStatus('Login Firebase effettuato.', 'ok');
         loginPassword.value = '';
     } catch (error) {
         setStatus(`Login fallito: ${error.message}`, 'err');
         setLuoghiStatus(`Login fallito: ${error.message}`, 'err');
+        setPaymentsStatus(`Login fallito: ${error.message}`, 'err');
     }
 }
 
@@ -1071,9 +1241,11 @@ async function firebaseLogout() {
         await fb.auth.signOut();
         setStatus('Logout effettuato.', 'ok');
         setLuoghiStatus('Logout effettuato.', 'ok');
+        setPaymentsStatus('Logout effettuato.', 'ok');
     } catch (error) {
         setStatus(`Logout fallito: ${error.message}`, 'err');
         setLuoghiStatus(`Logout fallito: ${error.message}`, 'err');
+        setPaymentsStatus(`Logout fallito: ${error.message}`, 'err');
     }
 }
 
@@ -1097,6 +1269,72 @@ function bindAuthState() {
             setAuthStatus('Non autenticato', false);
         }
     });
+}
+
+async function publishPaymentsFirebase() {
+    if (!requirePublisherAdmin()) {
+        return;
+    }
+    const fb = getFirebaseState();
+    if (!fb.ready || !fb.db || !fb.auth) {
+        setPaymentsStatus('Firebase non inizializzato.', 'err');
+        return;
+    }
+
+    if (!fb.auth.currentUser) {
+        setPaymentsStatus('Effettua prima il login Firebase.', 'err');
+        return;
+    }
+
+    const payload = {
+        columns: normalizePaymentColumns(paymentsColumns),
+        items: getPaymentsForPublish()
+    };
+
+    try {
+        await fb.db.ref('pagamenti').set(payload);
+        setPaymentsStatus(`Pagamenti pubblicati su Firebase: ${payload.items.length}.`, 'ok');
+    } catch (error) {
+        setPaymentsStatus(`Errore Firebase: ${error.message}`, 'err');
+    }
+}
+
+async function loadPaymentsFromFirebase(silent = false) {
+    const fb = getFirebaseState();
+    if (!fb.ready || !fb.db) {
+        if (!silent) {
+            setPaymentsStatus('Firebase non inizializzato.', 'err');
+        }
+        return false;
+    }
+
+    try {
+        const snap = await fb.db.ref('pagamenti').once('value');
+        const raw = snap.exists() ? snap.val() : [];
+        if (Array.isArray(raw)) {
+            paymentsItems = raw.map(normalizePayment);
+            paymentsColumns = normalizePaymentColumns({});
+        } else {
+            const items = Array.isArray(raw?.items)
+                ? raw.items
+                : Array.isArray(raw?.pagamenti)
+                    ? raw.pagamenti
+                    : Object.values(raw || {});
+            paymentsItems = items.map(normalizePayment);
+            paymentsColumns = normalizePaymentColumns(raw?.columns);
+        }
+        savePaymentsDraft();
+        renderAll();
+        if (!silent) {
+            setPaymentsStatus('Pagamenti caricati da Firebase.', 'ok');
+        }
+        return true;
+    } catch (error) {
+        if (!silent) {
+            setPaymentsStatus(`Errore caricamento Firebase: ${error.message}`, 'err');
+        }
+        return false;
+    }
 }
 
 async function loadSuggestionsFromFirebase(silent = false) {
@@ -1323,6 +1561,79 @@ luoghiList.addEventListener('click', event => {
     }
 });
 
+if (paymentsSheetBody) {
+    paymentsSheetBody.addEventListener('click', event => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+            return;
+        }
+        const row = target.closest('tr');
+        if (!row) {
+            return;
+        }
+        const index = Number(row.dataset.index);
+        if (Number.isNaN(index)) {
+            return;
+        }
+        paymentsSelectedRowIndex = index;
+        refreshPaymentsSelectedRowUI();
+    });
+
+    paymentsSheetBody.addEventListener('input', event => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+            return;
+        }
+        const cell = target.closest('td[data-field]');
+        const row = target.closest('tr');
+        if (!cell || !row) {
+            return;
+        }
+        const index = Number(row.dataset.index);
+        const field = String(cell.dataset.field || '').trim();
+        if (Number.isNaN(index) || !field || !paymentsItems[index]) {
+            return;
+        }
+        paymentsItems[index][field] = String(cell.textContent || '').trim();
+        savePaymentsDraft();
+        setPaymentsStatus('Bozza pagamenti aggiornata.', 'ok');
+    });
+
+    paymentsSheetBody.addEventListener('paste', event => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+            return;
+        }
+        const cell = target.closest('td[data-field]');
+        if (!cell) {
+            return;
+        }
+        event.preventDefault();
+        const plain = String(event.clipboardData?.getData('text/plain') || '').replace(/\r?\n/g, ' ').trim();
+        document.execCommand('insertText', false, plain);
+    });
+}
+const paymentsSheetHead = document.querySelector('#paymentsSheet thead');
+if (paymentsSheetHead) {
+    paymentsSheetHead.addEventListener('input', event => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+            return;
+        }
+        const cell = target.closest('th[data-colkey]');
+        if (!cell) {
+            return;
+        }
+        const key = String(cell.dataset.colkey || '').trim();
+        if (!key) {
+            return;
+        }
+        paymentsColumns[key] = String(cell.textContent || '').trim() || normalizePaymentColumns({})[key];
+        savePaymentsDraft();
+        setPaymentsStatus('Nome colonna aggiornato.', 'ok');
+    });
+}
+
 saveBtn.addEventListener('click', handleSaveNews);
 clearBtn.addEventListener('click', resetNewsForm);
 publishBtn.addEventListener('click', publishNewsFirebase);
@@ -1344,6 +1655,18 @@ if (luoghiSearchInput) {
         luoghiSearchTerm = String(event.target?.value || '');
         renderLuoghiList();
     });
+}
+if (paymentsAddRowBtn) {
+    paymentsAddRowBtn.addEventListener('click', addPaymentRow);
+}
+if (paymentsDeleteRowBtn) {
+    paymentsDeleteRowBtn.addEventListener('click', deleteSelectedPaymentRow);
+}
+if (paymentsPublishBtn) {
+    paymentsPublishBtn.addEventListener('click', publishPaymentsFirebase);
+}
+if (paymentsLoadBtn) {
+    paymentsLoadBtn.addEventListener('click', () => loadPaymentsFromFirebase(false));
 }
 
 loginBtn.addEventListener('click', firebaseLogin);
@@ -1386,11 +1709,13 @@ async function initPublisher() {
 
     await Promise.all([
         loadNewsFromFirebase(true),
+        loadPaymentsFromFirebase(true),
         loadLuoghiFromFirebase(true),
         loadSuggestionsFromFirebase(true)
     ]);
 
     setStatus('Pronto. Pagina News collegata a /news.', 'ok');
+    setPaymentsStatus('Pronto. Pagina Pagamenti collegata a /pagamenti.', 'ok');
     setLuoghiStatus('Pronto. Pagina Luoghi collegata a /luoghi.', 'ok');
     setSuggestionsStatus('Pronto. Coda segnalazioni collegata a /suggestions.', 'ok');
 }

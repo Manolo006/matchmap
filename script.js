@@ -607,6 +607,8 @@ async function renderLuoghiMap() {
 /* PARSING DESIGNAZIONE */
 const GUEST_EVENTS_STORAGE_KEY = 'matchmap_guest_dashboard_events_v1';
 let dashboardEvents = [];
+let dashboardShowAllHidden = false;
+let dashboardEventAutoRefreshTimer = null;
 const SUGGESTION_COOLDOWN_KEY = 'matchmap_last_suggestion_ts_v1';
 
 function parseDesignazione(testo) {
@@ -858,24 +860,56 @@ function computeTotalRimborso() {
     return dashboardEvents.reduce((sum, e) => sum + Number(e.rimborso || 0), 0);
 }
 
-function renderDashboardEvents() {
-    const tbody = document.querySelector('#eventTable tbody');
-    if (!tbody) {
-        return;
+function parseEventoDateTime(evento) {
+    const data = String(evento?.data || '').trim();
+    const ora = String(evento?.ora || '').trim();
+    const dateMatch = data.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    const timeMatch = ora.match(/^(\d{2}):(\d{2})$/);
+    if (!dateMatch || !timeMatch) {
+        return null;
     }
-    tbody.innerHTML = '';
+    const day = Number(dateMatch[1]);
+    const month = Number(dateMatch[2]);
+    const year = Number(dateMatch[3]);
+    const hour = Number(timeMatch[1]);
+    const minute = Number(timeMatch[2]);
+    const ts = new Date(year, month - 1, day, hour, minute, 0, 0).getTime();
+    return Number.isFinite(ts) ? ts : null;
+}
 
-    dashboardEvents.forEach((evento, index) => {
-        const mapsUrl = getMapsUrl(evento);
-        const calendarText = `${evento.categoria}: ${evento.squadre}`;
-        const calendarDetails = buildCalendarDescription(evento);
-        const row = document.createElement('tr');
-        row.innerHTML = `
+function getSortedDashboardEventsWithIndex() {
+    return dashboardEvents
+        .map((evento, index) => {
+            const startTs = parseEventoDateTime(evento);
+            return {
+                evento,
+                index,
+                startTs,
+                expired: startTs !== null && Date.now() >= (startTs + 60 * 1000)
+            };
+        })
+        .sort((a, b) => {
+            const aTs = a.startTs === null ? Number.POSITIVE_INFINITY : a.startTs;
+            const bTs = b.startTs === null ? Number.POSITIVE_INFINITY : b.startTs;
+            if (aTs !== bTs) {
+                return aTs - bTs;
+            }
+            return a.index - b.index;
+        });
+}
+
+function buildDashboardEventRow(item) {
+    const evento = item.evento;
+    const mapsUrl = getMapsUrl(evento);
+    const calendarText = `${evento.categoria}: ${evento.squadre}`;
+    const calendarDetails = buildCalendarDescription(evento);
+    const row = document.createElement('tr');
+    row.innerHTML = `
             <td>${evento.data}</td>
             <td>${evento.ora}</td>
             <td>${evento.squadre}</td>
             <td>${evento.categoria}</td>
-            <td>${evento.rimborso} €</td>
+            <td>${evento.rimborso} \u20AC</td>
             <td>
                 <a class="icon-link maps-link" target="_blank" rel="noopener noreferrer" href="${mapsUrl}" title="Apri su Google Maps" aria-label="Apri su Google Maps">
                     <img src="img/maps.png" alt="Google Maps">
@@ -887,21 +921,91 @@ function renderDashboardEvents() {
                 </a>
             </td>
             <td>
-                <button type="button" class="event-remove-btn" onclick="removeDashboardEvent(${index})" aria-label="Elimina evento" title="Elimina evento">
+                <button type="button" class="event-remove-btn" onclick="removeDashboardEvent(${item.index})" aria-label="Elimina evento" title="Elimina evento">
                     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                        <path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7A1 1 0 1 0 5.7 7.12L10.59 12l-4.9 4.89a1 1 0 0 0 1.42 1.41L12 13.41l4.89 4.9a1 1 0 0 0 1.41-1.42L13.41 12l4.9-4.89a1 1 0 0 0-.01-1.4z"></path>
+                        <path d="M3 6h18"></path>
+                        <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path>
+                        <path d="M19 6l-1 14a1 1 0 0 1-1 .93H7a1 1 0 0 1-1-.93L5 6"></path>
+                        <path d="M10 11v6"></path>
+                        <path d="M14 11v6"></path>
                     </svg>
                 </button>
             </td>
         `;
-        tbody.appendChild(row);
+    return row;
+}
+
+function updateDashboardShowMoreControls(hiddenCount) {
+    const btn = document.getElementById('dashboardShowMoreBtn');
+    if (!btn) {
+        return;
+    }
+    if (hiddenCount <= 0) {
+        btn.hidden = true;
+        return;
+    }
+    btn.hidden = false;
+    btn.textContent = dashboardShowAllHidden
+        ? 'Mostra meno'
+        : `Mostra di piu (${hiddenCount})`;
+}
+
+function renderDashboardEvents() {
+    const tbody = document.querySelector('#eventTable tbody');
+    if (!tbody) {
+        return;
+    }
+    tbody.innerHTML = '';
+
+    const sortedItems = getSortedDashboardEventsWithIndex();
+    const visibleItems = [];
+    const hiddenItems = [];
+
+    sortedItems.forEach(item => {
+        if (item.expired) {
+            hiddenItems.push(item);
+            return;
+        }
+        if (visibleItems.length < 4) {
+            visibleItems.push(item);
+            return;
+        }
+        hiddenItems.push(item);
     });
+
+    visibleItems.forEach(item => {
+        tbody.appendChild(buildDashboardEventRow(item));
+    });
+
+    if (dashboardShowAllHidden) {
+        hiddenItems.forEach(item => {
+            const row = buildDashboardEventRow(item);
+            row.classList.add('event-hidden-row');
+            tbody.appendChild(row);
+        });
+    }
+
+    updateDashboardShowMoreControls(hiddenItems.length);
 
     const total = computeTotalRimborso();
     const totalEl = document.getElementById('rimborsoTotale');
     if (totalEl) {
-        totalEl.textContent = `Rimborso totale: ${total} €`;
+        totalEl.textContent = `Rimborso totale: ${total} \u20AC`;
     }
+}
+
+function toggleDashboardShowMore() {
+    dashboardShowAllHidden = !dashboardShowAllHidden;
+    renderDashboardEvents();
+}
+
+function ensureDashboardEventAutoRefresh() {
+    if (dashboardEventAutoRefreshTimer) {
+        return;
+    }
+    dashboardEventAutoRefreshTimer = setInterval(() => {
+        renderDashboardEvents();
+    }, 15000);
 }
 
 async function removeDashboardEvent(index) {
@@ -1031,21 +1135,53 @@ function renderNews(selectedRegion = 'all') {
     }
 
     const normalizedSelected = normalizeText(selectedRegion);
-    const filtered = normalizedSelected === 'all'
-        ? newsDb
-        : newsDb.filter(item => {
+    const parseNewsTimestamp = item => {
+        const fromNumeric = Number(item?.createdAt ?? item?.timestamp ?? item?.ts ?? item?.updatedAt);
+        if (Number.isFinite(fromNumeric) && fromNumeric > 0) {
+            return fromNumeric;
+        }
+        const dateText = String(item?.data || item?.date || '').trim();
+        const match = dateText.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (match) {
+            const day = Number(match[1]);
+            const month = Number(match[2]);
+            const year = Number(match[3]);
+            const ts = new Date(year, month - 1, day, 12, 0, 0, 0).getTime();
+            return Number.isFinite(ts) ? ts : null;
+        }
+        return null;
+    };
+
+    const newsEntries = newsDb.map((item, sourceIndex) => ({ item, sourceIndex }));
+    const filteredEntries = normalizedSelected === 'all'
+        ? newsEntries
+        : newsEntries.filter(({ item }) => {
             const normalizedRegion = normalizeText(item.regione);
             return normalizedRegion === normalizedSelected || normalizedRegion === 'tutti';
         });
+    filteredEntries.sort((a, b) => {
+        const tsA = parseNewsTimestamp(a.item);
+        const tsB = parseNewsTimestamp(b.item);
+        if (tsA !== null && tsB !== null && tsA !== tsB) {
+            return tsB - tsA; // piu recente prima
+        }
+        if (tsA !== null && tsB === null) {
+            return -1;
+        }
+        if (tsA === null && tsB !== null) {
+            return 1;
+        }
+        return b.sourceIndex - a.sourceIndex; // fallback: ultimi inseriti prima
+    });
 
     container.innerHTML = '';
 
-    if (!filtered.length) {
+    if (!filteredEntries.length) {
         container.innerHTML = '<article class="news-item"><h4>Nessuna notizia disponibile</h4><p>Non ci sono aggiornamenti per la regione selezionata.</p></article>';
         return;
     }
 
-    filtered.forEach(item => {
+    filteredEntries.forEach(({ item }) => {
         const normalizedRegion = normalizeText(item.regione);
         const normalizedContent = normalizeText(`${item.titolo || ''} ${item.testo || ''}`);
         const paymentKeywords = ['pagament', 'rimbor', 'bonific', 'accredit', 'liquid', 'pacco', 'pacchi'];
@@ -1075,7 +1211,12 @@ function renderNews(selectedRegion = 'all') {
 
 function setupNewsRegionFilter() {
     const select = document.getElementById('regionFilter');
-    if (!select) {
+    const customWrap = document.getElementById('regionFilterCustom');
+    const toggleBtn = document.getElementById('regionFilterToggle');
+    const menu = document.getElementById('regionFilterMenu');
+    const labelEl = document.getElementById('regionFilterLabel');
+    const logoEl = document.getElementById('regionFilterLogo');
+    if (!select || !customWrap || !toggleBtn || !menu || !labelEl || !logoEl) {
         return;
     }
 
@@ -1084,30 +1225,147 @@ function setupNewsRegionFilter() {
         .sort((a, b) => a.localeCompare(b, 'it'));
 
     select.innerHTML = '<option value="all">Tutte le regioni</option>';
-
+    const options = [{
+        value: 'all',
+        label: 'Tutte le regioni',
+        logo: ''
+    }];
     uniqueRegions.forEach(region => {
         const option = document.createElement('option');
         option.value = region;
         option.textContent = region;
         select.appendChild(option);
+        options.push({
+            value: region,
+            label: region,
+            logo: getRegionLogoPath(region) || ''
+        });
     });
 
-    select.addEventListener('change', event => {
-        renderNews(event.target.value);
+    const closeMenu = () => {
+        menu.hidden = true;
+        toggleBtn.setAttribute('aria-expanded', 'false');
+    };
+    const openMenu = () => {
+        menu.hidden = false;
+        toggleBtn.setAttribute('aria-expanded', 'true');
+    };
+    const setSelection = (value) => {
+        const selected = options.find(x => String(x.value) === String(value)) || options[0];
+        select.value = selected.value;
+        labelEl.textContent = selected.label;
+        if (selected.logo) {
+            logoEl.src = selected.logo;
+            logoEl.alt = `Logo ${selected.label}`;
+            logoEl.hidden = false;
+        } else {
+            logoEl.hidden = true;
+            logoEl.removeAttribute('src');
+            logoEl.alt = '';
+        }
+        menu.querySelectorAll('.region-filter-option').forEach(btn => {
+            const isActive = btn.getAttribute('data-value') === String(selected.value);
+            btn.classList.toggle('is-active', isActive);
+        });
+        renderNews(selected.value);
+    };
+
+    menu.innerHTML = options.map(option => {
+        const logoMarkup = option.logo
+            ? `<img class="region-filter-logo" src="${option.logo}" alt="" loading="lazy" decoding="async">`
+            : '';
+        return `
+            <button type="button" class="region-filter-option" data-value="${option.value}" role="option">
+                ${logoMarkup}
+                <span>${option.label}</span>
+            </button>
+        `;
+    }).join('');
+
+    toggleBtn.onclick = event => {
+        event.stopPropagation();
+        if (menu.hidden) {
+            openMenu();
+        } else {
+            closeMenu();
+        }
+    };
+
+    menu.onclick = event => {
+        const target = event.target;
+        if (!(target instanceof HTMLElement)) {
+            return;
+        }
+        const btn = target.closest('.region-filter-option');
+        if (!btn) {
+            return;
+        }
+        const value = btn.getAttribute('data-value') || 'all';
+        setSelection(value);
+        closeMenu();
+    };
+
+    document.addEventListener('click', event => {
+        if (!customWrap.contains(event.target)) {
+            closeMenu();
+        }
     });
+
+    setSelection(select.value || 'all');
 }
 
 /* TABELLA PAGAMENTI */
 let paymentsDb = [];
+let paymentsColumns = {
+    regione: 'Regione',
+    inPagamento: 'Pacchi in pagamento',
+    fineFebbraio: 'Fine febbraio',
+    chat: 'Riscontro chat',
+    stato: 'Stato'
+};
 
 function normalizePaymentsPayload(payload) {
+    const fallbackColumns = {
+        regione: 'Regione',
+        inPagamento: 'Pacchi in pagamento',
+        fineFebbraio: 'Fine febbraio',
+        chat: 'Riscontro chat',
+        stato: 'Stato'
+    };
+    const normalizeColumns = value => {
+        const raw = value || {};
+        return {
+            regione: String(raw.regione || fallbackColumns.regione).trim() || fallbackColumns.regione,
+            inPagamento: String(raw.inPagamento || fallbackColumns.inPagamento).trim() || fallbackColumns.inPagamento,
+            fineFebbraio: String(raw.fineFebbraio || fallbackColumns.fineFebbraio).trim() || fallbackColumns.fineFebbraio,
+            chat: String(raw.chat || fallbackColumns.chat).trim() || fallbackColumns.chat,
+            stato: String(raw.stato || fallbackColumns.stato).trim() || fallbackColumns.stato
+        };
+    };
+
     if (Array.isArray(payload)) {
-        return payload;
+        return { items: payload, columns: normalizeColumns({}) };
     }
     if (Array.isArray(payload?.pagamenti)) {
-        return payload.pagamenti;
+        return { items: payload.pagamenti, columns: normalizeColumns(payload?.columns) };
     }
-    return [];
+    if (Array.isArray(payload?.items)) {
+        return { items: payload.items, columns: normalizeColumns(payload?.columns) };
+    }
+    if (payload && typeof payload === 'object') {
+        const values = Object.values(payload || {});
+        const looksLikePaymentRow = values.some(entry => {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+                return false;
+            }
+            return ['regione', 'inPagamento', 'fineFebbraio', 'chat', 'stato']
+                .some(key => key in entry);
+        });
+        if (looksLikePaymentRow) {
+            return { items: values, columns: normalizeColumns(payload?.columns) };
+        }
+    }
+    return { items: [], columns: normalizeColumns(payload?.columns) };
 }
 
 async function loadPaymentsFromFirebase() {
@@ -1119,15 +1377,16 @@ async function loadPaymentsFromFirebase() {
     if (!snap.exists()) {
         return [];
     }
-    const raw = snap.val();
-    return Array.isArray(raw) ? raw : Object.values(raw || {});
+    return snap.val();
 }
 
 async function loadPaymentsDb() {
     try {
         const firebasePayments = await loadPaymentsFromFirebase();
         if (firebasePayments) {
-            paymentsDb = normalizePaymentsPayload(firebasePayments);
+            const normalized = normalizePaymentsPayload(firebasePayments);
+            paymentsDb = Array.isArray(normalized.items) ? normalized.items : [];
+            paymentsColumns = normalized.columns || paymentsColumns;
             return;
         }
     } catch (error) {
@@ -1137,8 +1396,16 @@ async function loadPaymentsDb() {
 
 function renderPaymentsTable() {
     const tbody = document.querySelector('#paymentsTable tbody');
+    const headers = document.querySelectorAll('#paymentsTable thead th');
     if (!tbody) {
         return;
+    }
+    if (headers.length >= 5) {
+        headers[0].textContent = paymentsColumns.regione || 'Regione';
+        headers[1].textContent = paymentsColumns.inPagamento || 'Pacchi in pagamento';
+        headers[2].textContent = paymentsColumns.fineFebbraio || 'Fine febbraio';
+        headers[3].textContent = paymentsColumns.chat || 'Riscontro chat';
+        headers[4].textContent = paymentsColumns.stato || 'Stato';
     }
 
     tbody.innerHTML = '';
@@ -1161,13 +1428,24 @@ function renderPaymentsTable() {
         const statusKey = normalizeText(item.stato);
         const row = document.createElement('tr');
         row.className = statusClassMap[statusKey] || '';
-        row.innerHTML = `
-            <td>${item.regione || '-'}</td>
-            <td>${item.inPagamento || '-'}</td>
-            <td>${item.fineFebbraio || '-'}</td>
-            <td>${item.chat || '-'}</td>
-            <td>${item.stato || 'aggiornamento'}</td>
-        `;
+
+        const statusBadgeClass = statusClassMap[statusKey] || 'pay-planned';
+        const statoText = item.stato || 'aggiornamento';
+        const cells = [
+            { label: paymentsColumns.regione || 'Regione', value: item.regione || '-' },
+            { label: paymentsColumns.inPagamento || 'Pacchi in pagamento', value: item.inPagamento || '-' },
+            { label: paymentsColumns.fineFebbraio || 'Fine febbraio', value: item.fineFebbraio || '-' },
+            { label: paymentsColumns.chat || 'Riscontro chat', value: item.chat || '-' },
+            {
+                label: paymentsColumns.stato || 'Stato',
+                value: `<span class="payments-status-badge ${statusBadgeClass}">${statoText}</span>`
+            }
+        ];
+
+        row.innerHTML = cells
+            .map(cell => `<td data-label="${cell.label}">${cell.value}</td>`)
+            .join('');
+
         tbody.appendChild(row);
     });
 }
@@ -1450,9 +1728,14 @@ window.removeDashboardEvent = removeDashboardEvent;
 window.submitUserSuggestion = submitUserSuggestion;
 window.searchSuggestionPlace = searchSuggestionPlace;
 window.searchMapPlaceFromBar = searchMapPlaceFromBar;
+window.toggleDashboardShowMore = toggleDashboardShowMore;
 
 const mapQuickSearchInput = document.getElementById('mapQuickSearchInput');
 const mapQuickSearchSuggestions = document.getElementById('mapQuickSearchSuggestions');
+const dashboardShowMoreBtn = document.getElementById('dashboardShowMoreBtn');
+if (dashboardShowMoreBtn) {
+    dashboardShowMoreBtn.addEventListener('click', toggleDashboardShowMore);
+}
 if (mapQuickSearchInput) {
     mapQuickSearchInput.addEventListener('input', () => {
         renderMapSearchSuggestions();
@@ -1533,3 +1816,5 @@ Promise.all([loadNewsDb(), loadPaymentsDb()]).then(() => {
 });
 initDashboardAuth();
 setupAuthPopover();
+ensureDashboardEventAutoRefresh();
+

@@ -82,6 +82,9 @@
                     <tbody></tbody>
                 </table>
             </div>
+            <div class="dashboard-more-wrap">
+                <button id="dashboardShowMoreBtn" class="primary-btn dashboard-more-btn" type="button" hidden>Mostra di piu</button>
+            </div>
         </div>
     </section>
 
@@ -89,8 +92,18 @@
         <div class="panel news-panel">
             <h2>Ultime notizie sui rimborsi</h2>
             <div class="news-filters">
-                <label for="regionFilter">Regione</label>
-                <select id="regionFilter">
+                <label for="regionFilterToggle">Regione</label>
+                <div id="regionFilterCustom" class="region-filter-select">
+                    <button id="regionFilterToggle" class="region-filter-toggle" type="button" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="region-filter-current">
+                            <img id="regionFilterLogo" class="region-filter-logo" alt="" hidden>
+                            <span id="regionFilterLabel">Tutte le regioni</span>
+                        </span>
+                        <span class="region-filter-caret" aria-hidden="true"></span>
+                    </button>
+                    <div id="regionFilterMenu" class="region-filter-menu" role="listbox" hidden></div>
+                </div>
+                <select id="regionFilter" hidden>
                     <option value="all">Tutte le regioni</option>
                 </select>
             </div>

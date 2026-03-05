@@ -334,6 +334,20 @@ textarea:focus {
     font-weight: 600;
 }
 
+.dashboard-more-wrap {
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.dashboard-more-btn {
+    min-height: 40px;
+}
+
+#eventTable tbody tr.event-hidden-row td {
+    opacity: 0.84;
+}
+
 .table-wrap {
     overflow-x: auto;
     border-radius: 18px;
@@ -469,6 +483,98 @@ a:hover {
     color-scheme: dark;
 }
 
+.region-filter-select {
+    position: relative;
+}
+
+.region-filter-toggle {
+    width: 100%;
+    min-height: 44px;
+    border-radius: 16px;
+    border: 1px solid rgba(159, 178, 221, 0.35);
+    background: rgba(9, 18, 37, 0.9);
+    color: var(--text);
+    padding: 10px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.region-filter-toggle:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(76, 201, 240, 0.22);
+}
+
+.region-filter-current {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.region-filter-logo {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+    flex: 0 0 18px;
+}
+
+.region-filter-caret {
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #9fdcff;
+    flex: 0 0 auto;
+}
+
+.region-filter-menu {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 6px);
+    z-index: 20;
+    max-height: 320px;
+    overflow: auto;
+    border: 1px solid rgba(159, 178, 221, 0.35);
+    border-radius: 14px;
+    background: rgba(8, 16, 31, 0.98);
+    box-shadow: 0 16px 34px rgba(0, 0, 0, 0.35);
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+.region-filter-menu::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+}
+
+.region-filter-option {
+    width: 100%;
+    border: 0;
+    border-bottom: 1px solid rgba(159, 178, 221, 0.16);
+    border-radius: 0;
+    background: transparent;
+    color: var(--text);
+    padding: 9px 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    justify-content: flex-start;
+    text-align: left;
+}
+
+.region-filter-option:last-child {
+    border-bottom: 0;
+}
+
+.region-filter-option:hover,
+.region-filter-option.is-active {
+    background: rgba(76, 201, 240, 0.15);
+}
+
 .news-item {
     background: rgba(8, 15, 30, 0.75);
     border: 1px solid rgba(159, 178, 221, 0.2);
@@ -500,11 +606,51 @@ a:hover {
     color: var(--muted);
 }
 
+.news-item-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.news-region-logo {
+    width: 40px;
+    height: 40px;
+    min-width: 22px;
+    min-height: 22px;
+    object-fit: contain;
+    display: block;
+}
+
 .payments-legend {
     display: flex;
     flex-wrap: wrap;
     gap: 8px;
     margin-bottom: 12px;
+}
+
+.payments-panel .table-wrap {
+    border: 1px solid rgba(159, 178, 221, 0.25);
+    border-radius: 16px;
+    background: linear-gradient(160deg, rgba(8, 16, 31, 0.72), rgba(12, 22, 44, 0.56));
+}
+
+#paymentsTable {
+    min-width: 760px;
+}
+
+#paymentsTable thead th {
+    background: rgba(9, 18, 37, 0.92);
+    color: #d8e7ff;
+    font-size: 0.74rem;
+    letter-spacing: 0.06em;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+#paymentsTable tbody td {
+    vertical-align: middle;
 }
 
 .legend-item {
@@ -531,21 +677,51 @@ a:hover {
 }
 
 #paymentsTable tbody tr.pay-confirmed td {
-    background: rgba(46, 204, 113, 0.12);
+    background: rgba(46, 204, 113, 0.1);
 }
 
 #paymentsTable tbody tr.pay-monitoring td {
-    background: rgba(245, 158, 11, 0.12);
+    background: rgba(245, 158, 11, 0.1);
 }
 
 #paymentsTable tbody tr.pay-planned td {
-    background: rgba(59, 130, 246, 0.12);
+    background: rgba(59, 130, 246, 0.1);
 }
 
 #paymentsTable tbody tr.payments-empty-row td {
     text-align: center;
     color: var(--muted);
     background: rgba(9, 18, 37, 0.55);
+}
+
+.payments-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.74rem;
+    font-weight: 700;
+    border: 1px solid transparent;
+    text-transform: capitalize;
+}
+
+.payments-status-badge.pay-confirmed {
+    color: #dcfff0;
+    background: rgba(46, 204, 113, 0.24);
+    border-color: rgba(110, 231, 183, 0.52);
+}
+
+.payments-status-badge.pay-monitoring {
+    color: #fff3d6;
+    background: rgba(245, 158, 11, 0.22);
+    border-color: rgba(251, 191, 36, 0.52);
+}
+
+.payments-status-badge.pay-planned {
+    color: #e2efff;
+    background: rgba(59, 130, 246, 0.24);
+    border-color: rgba(147, 197, 253, 0.5);
 }
 
 .event-remove-btn {
@@ -562,7 +738,11 @@ a:hover {
 .event-remove-btn svg {
     width: 18px;
     height: 18px;
-    fill: currentColor;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
     display: block;
 }
 
@@ -1032,6 +1212,12 @@ a:hover {
     }
 
     /* Pagamenti: su mobile mostra card verticali con etichette */
+    .payments-panel .table-wrap {
+        overflow: visible;
+        background: transparent;
+        border: 0;
+    }
+
     #paymentsTable {
         min-width: 0;
         width: 100%;
@@ -1053,21 +1239,22 @@ a:hover {
     #paymentsTable tbody tr {
         margin-bottom: 10px;
         padding: 10px;
-        border: 1px solid rgba(159, 178, 221, 0.18);
+        border: 1px solid rgba(159, 178, 221, 0.22);
         border-radius: 14px;
-        background: rgba(9, 18, 37, 0.55);
+        background: rgba(9, 18, 37, 0.58);
     }
 
     #paymentsTable td {
         border: 0;
-        padding: 5px 0;
+        padding: 6px 0;
         white-space: normal;
-        font-size: 0.88rem;
-        line-height: 1.3;
+        font-size: 0.9rem;
+        line-height: 1.35;
         background: transparent !important;
     }
 
     #paymentsTable td::before {
+        content: attr(data-label);
         display: block;
         color: #bcd5ff;
         font-size: 0.72rem;
@@ -1077,28 +1264,22 @@ a:hover {
         margin-bottom: 2px;
     }
 
-    #paymentsTable td:nth-child(1)::before { content: "Regione"; }
-    #paymentsTable td:nth-child(2)::before { content: "Pacchi in pagamento"; }
-    #paymentsTable td:nth-child(3)::before { content: "Fine febbraio"; }
-    #paymentsTable td:nth-child(4)::before { content: "Riscontro chat"; }
-    #paymentsTable td:nth-child(5)::before { content: "Stato"; }
-
     #paymentsTable tbody tr.payments-empty-row td::before {
         content: none;
     }
 
     #paymentsTable tbody tr.pay-confirmed {
-        border-color: rgba(110, 231, 183, 0.42);
-        background: linear-gradient(145deg, rgba(8, 30, 24, 0.75), rgba(8, 18, 34, 0.72));
+        border-color: rgba(110, 231, 183, 0.44);
+        background: linear-gradient(145deg, rgba(8, 30, 24, 0.78), rgba(8, 18, 34, 0.75));
     }
 
     #paymentsTable tbody tr.pay-monitoring {
-        border-color: rgba(251, 191, 36, 0.45);
-        background: linear-gradient(145deg, rgba(44, 30, 8, 0.72), rgba(8, 18, 34, 0.72));
+        border-color: rgba(251, 191, 36, 0.48);
+        background: linear-gradient(145deg, rgba(44, 30, 8, 0.75), rgba(8, 18, 34, 0.75));
     }
 
     #paymentsTable tbody tr.pay-planned {
-        border-color: rgba(147, 197, 253, 0.42);
-        background: linear-gradient(145deg, rgba(8, 24, 44, 0.72), rgba(8, 18, 34, 0.72));
+        border-color: rgba(147, 197, 253, 0.45);
+        background: linear-gradient(145deg, rgba(8, 24, 44, 0.75), rgba(8, 18, 34, 0.75));
     }
 }

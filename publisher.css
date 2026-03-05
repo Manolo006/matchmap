@@ -183,6 +183,7 @@ body {
 }
 
 #newsPage,
+#paymentsPage,
 #luoghiPage {
     width: min(100%, var(--content-width)) !important;
     margin: 0 auto !important;
@@ -200,6 +201,7 @@ body {
 }
 
 #newsPage .card,
+#paymentsPage .card,
 #luoghiPage .card {
     width: 100% !important;
     margin: 0 !important;
@@ -322,6 +324,55 @@ button:hover {
 .list {
     display: grid;
     gap: 8px;
+}
+
+.sheet-wrap {
+    margin-top: 10px;
+    overflow: auto;
+    border: 1px solid rgba(155, 176, 216, 0.25);
+    border-radius: 14px;
+    background: rgba(8, 14, 28, 0.78);
+}
+
+.sheet-table {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: collapse;
+}
+
+.sheet-table th,
+.sheet-table td {
+    border-bottom: 1px solid rgba(155, 176, 216, 0.2);
+    padding: 10px 10px;
+    text-align: left;
+    vertical-align: top;
+}
+
+.sheet-table th {
+    color: #d4e3ff;
+    font-size: 0.76rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    background: rgba(9, 17, 33, 0.92);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.sheet-table td {
+    min-width: 140px;
+    color: var(--text);
+    background: transparent;
+    outline: none;
+}
+
+.sheet-table td:focus {
+    background: rgba(105, 209, 255, 0.12);
+    box-shadow: inset 0 0 0 1px rgba(105, 209, 255, 0.55);
+}
+
+.sheet-table tr.is-selected td {
+    background: rgba(110, 231, 183, 0.12);
 }
 
 .item {
