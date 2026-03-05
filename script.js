@@ -1396,9 +1396,22 @@ async function loadPaymentsDb() {
 
 function renderPaymentsTable() {
     const tbody = document.querySelector('#paymentsTable tbody');
+    const table = document.getElementById('paymentsTable');
     const headers = document.querySelectorAll('#paymentsTable thead th');
     if (!tbody) {
         return;
+    }
+    const isEmptyChatValue = value => {
+        const raw = String(value ?? '').trim();
+        if (!raw) {
+            return true;
+        }
+        const normalized = normalizeText(raw);
+        return !normalized || normalized === 'na' || normalized === 'n a' || normalized === 'nessuno';
+    };
+    const hasAnyChatValue = paymentsDb.some(item => !isEmptyChatValue(item?.chat));
+    if (table) {
+        table.classList.toggle('payments-hide-chat', !hasAnyChatValue);
     }
     if (headers.length >= 5) {
         headers[0].textContent = paymentsColumns.regione || 'Regione';
@@ -1406,6 +1419,7 @@ function renderPaymentsTable() {
         headers[2].textContent = paymentsColumns.fineFebbraio || 'Fine febbraio';
         headers[3].textContent = paymentsColumns.chat || 'Riscontro chat';
         headers[4].textContent = paymentsColumns.stato || 'Stato';
+        headers[3].hidden = !hasAnyChatValue;
     }
 
     tbody.innerHTML = '';
@@ -1419,7 +1433,7 @@ function renderPaymentsTable() {
     if (!paymentsDb.length) {
         const row = document.createElement('tr');
         row.className = 'payments-empty-row';
-        row.innerHTML = '<td colspan="5">Nessun aggiornamento pagamenti disponibile al momento.</td>';
+        row.innerHTML = `<td colspan="${hasAnyChatValue ? 5 : 4}">Nessun aggiornamento pagamenti disponibile al momento.</td>`;
         tbody.appendChild(row);
         return;
     }
@@ -1432,18 +1446,25 @@ function renderPaymentsTable() {
         const statusBadgeClass = statusClassMap[statusKey] || 'pay-planned';
         const statoText = item.stato || 'aggiornamento';
         const cells = [
-            { label: paymentsColumns.regione || 'Regione', value: item.regione || '-' },
-            { label: paymentsColumns.inPagamento || 'Pacchi in pagamento', value: item.inPagamento || '-' },
-            { label: paymentsColumns.fineFebbraio || 'Fine febbraio', value: item.fineFebbraio || '-' },
-            { label: paymentsColumns.chat || 'Riscontro chat', value: item.chat || '-' },
-            {
-                label: paymentsColumns.stato || 'Stato',
-                value: `<span class="payments-status-badge ${statusBadgeClass}">${statoText}</span>`
-            }
+            { label: paymentsColumns.regione || 'Regione', value: item.regione || '-', className: 'pay-cell-region' },
+            { label: paymentsColumns.inPagamento || 'Pacchi in pagamento', value: item.inPagamento || '-', className: 'pay-cell-num' },
+            { label: paymentsColumns.fineFebbraio || 'Fine febbraio', value: item.fineFebbraio || '-', className: 'pay-cell-num' }
         ];
+        if (hasAnyChatValue) {
+            cells.push({
+                label: paymentsColumns.chat || 'Riscontro chat',
+                value: item.chat || '-',
+                className: 'pay-cell-chat'
+            });
+        }
+        cells.push({
+            label: paymentsColumns.stato || 'Stato',
+            value: `<span class="payments-status-badge ${statusBadgeClass}">${statoText}</span>`,
+            className: 'pay-cell-status'
+        });
 
         row.innerHTML = cells
-            .map(cell => `<td data-label="${cell.label}">${cell.value}</td>`)
+            .map(cell => `<td data-label="${cell.label}" class="${cell.className || ''}">${cell.value}</td>`)
             .join('');
 
         tbody.appendChild(row);

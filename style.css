@@ -18,6 +18,7 @@
 }
 
 html {
+    font-size: clamp(13px, 1.55vw, 16px);
     -webkit-text-size-adjust: 100%;
 }
 
@@ -644,6 +645,9 @@ a:hover {
     color: #d8e7ff;
     font-size: 0.74rem;
     letter-spacing: 0.06em;
+    white-space: normal;
+    line-height: 1.22;
+    text-wrap: balance;
     position: sticky;
     top: 0;
     z-index: 1;
@@ -651,6 +655,24 @@ a:hover {
 
 #paymentsTable tbody td {
     vertical-align: middle;
+}
+
+#paymentsTable td.pay-cell-num {
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+#paymentsTable td.pay-cell-status {
+    text-align: center;
+}
+
+#paymentsTable.payments-hide-chat thead th:nth-child(4),
+#paymentsTable.payments-hide-chat tbody td:nth-child(4):not(.pay-cell-status) {
+    display: none !important;
+}
+
+#paymentsTable thead th[hidden] {
+    display: none !important;
 }
 
 .legend-item {
@@ -1044,7 +1066,7 @@ a:hover {
 
 @media (max-width: 640px) {
     body {
-        font-size: 16px;
+        font-size: clamp(13px, 4.1vw, 16px);
     }
 
     .app-header,
@@ -1060,7 +1082,7 @@ a:hover {
     }
 
     .app-header h1 {
-        font-size: 2rem;
+        font-size: clamp(1.55rem, 8vw, 2rem);
     }
 
     .tab-buttons {
@@ -1073,7 +1095,7 @@ a:hover {
     .tab-buttons button {
         width: 100%;
         min-height: 44px;
-        font-size: 0.98rem;
+        font-size: clamp(0.88rem, 3.8vw, 0.98rem);
     }
 
     .map-search-bar {
@@ -1088,7 +1110,7 @@ a:hover {
 
     .panel {
         border-radius: 16px;
-        padding: 12px;
+        padding: clamp(9px, 2.8vw, 12px);
     }
 
     textarea {
@@ -1100,7 +1122,7 @@ a:hover {
     }
 
     .table-wrap {
-        overflow-x: hidden;
+        overflow-x: auto;
     }
 
     /* Eventi: su mobile passa da tabella a card verticali leggibili */
@@ -1211,75 +1233,168 @@ a:hover {
         max-width: none;
     }
 
-    /* Pagamenti: su mobile mostra card verticali con etichette */
+    /* Pagamenti: su mobile usa tabella classica con scroll orizzontale (piu stabile) */
     .payments-panel .table-wrap {
-        overflow: visible;
+        display: block;
+        width: 100%;
+        max-width: 100%;
+        overflow-x: auto !important;
+        overflow-y: visible;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-x pan-y;
         background: transparent;
         border: 0;
     }
 
     #paymentsTable {
+        display: table !important;
         min-width: 0;
         width: 100%;
-        border-collapse: separate;
-        border-spacing: 0;
+        border-collapse: collapse;
+        table-layout: fixed;
     }
 
     #paymentsTable thead {
-        display: none;
+        display: table-header-group !important;
     }
 
-    #paymentsTable tbody,
-    #paymentsTable tr,
+    #paymentsTable tbody {
+        display: table-row-group !important;
+    }
+
+    #paymentsTable tr {
+        display: table-row !important;
+    }
+
+    #paymentsTable th,
     #paymentsTable td {
-        display: block;
-        width: 100%;
-    }
-
-    #paymentsTable tbody tr {
-        margin-bottom: 10px;
-        padding: 10px;
-        border: 1px solid rgba(159, 178, 221, 0.22);
-        border-radius: 14px;
-        background: rgba(9, 18, 37, 0.58);
-    }
-
-    #paymentsTable td {
-        border: 0;
-        padding: 6px 0;
+        display: table-cell !important;
+        width: auto !important;
         white-space: normal;
-        font-size: 0.9rem;
-        line-height: 1.35;
-        background: transparent !important;
+        line-height: 1.22;
+        border-bottom: 1px solid rgba(159, 178, 221, 0.2);
+        padding: clamp(7px, 2vw, 10px) clamp(6px, 1.8vw, 8px);
     }
 
     #paymentsTable td::before {
-        content: attr(data-label);
-        display: block;
-        color: #bcd5ff;
+        content: none !important;
+    }
+
+    #paymentsTable thead th {
+        position: static;
+        font-size: clamp(0.62rem, 2.5vw, 0.74rem);
+    }
+
+    #paymentsTable th:nth-child(2),
+    #paymentsTable td:nth-child(2),
+    #paymentsTable th:nth-child(3),
+    #paymentsTable td:nth-child(3),
+    #paymentsTable th:nth-child(4),
+    #paymentsTable td:nth-child(4) {
+        max-width: 118px;
+        overflow-wrap: anywhere;
+        word-break: break-word;
+    }
+
+    #paymentsTable th:nth-child(1),
+    #paymentsTable td:nth-child(1) {
+        width: 34%;
+    }
+
+    #paymentsTable th:nth-child(2),
+    #paymentsTable td:nth-child(2) {
+        width: 15%;
+        text-align: center;
+    }
+
+    #paymentsTable th:nth-child(3),
+    #paymentsTable td:nth-child(3) {
+        width: 16%;
+        text-align: center;
+    }
+
+    #paymentsTable th:nth-child(4),
+    #paymentsTable td:nth-child(4) {
+        width: 17%;
+    }
+
+    #paymentsTable th:nth-child(5),
+    #paymentsTable td:nth-child(5) {
+        width: 18%;
+        text-align: center;
+    }
+
+    #paymentsTable.payments-hide-chat th:nth-child(1),
+    #paymentsTable.payments-hide-chat td:nth-child(1) {
+        width: 46%;
+    }
+
+    #paymentsTable.payments-hide-chat th:nth-child(2),
+    #paymentsTable.payments-hide-chat td:nth-child(2) {
+        width: 16%;
+    }
+
+    #paymentsTable.payments-hide-chat th:nth-child(3),
+    #paymentsTable.payments-hide-chat td:nth-child(3) {
+        width: 16%;
+    }
+
+    #paymentsTable.payments-hide-chat th:nth-child(5),
+    #paymentsTable.payments-hide-chat td:nth-child(5) {
+        width: 22%;
+    }
+}
+
+@media (max-width: 420px) {
+    .app-header,
+    .container {
+        padding-left: 6px;
+        padding-right: 6px;
+    }
+
+    .tab-buttons {
+        gap: 7px;
+    }
+
+    .panel {
+        border-radius: 14px;
+        padding: 9px;
+    }
+
+    #paymentsTable {
+        min-width: 0;
+    }
+
+    #paymentsTable th,
+    #paymentsTable td {
+        font-size: 0.76rem;
+        padding: 6px 5px;
+    }
+}
+
+@media (max-width: 360px) {
+    .app-header,
+    .container {
+        padding-left: 4px;
+        padding-right: 4px;
+    }
+
+    .tab-buttons button {
+        min-height: 42px;
+        font-size: 0.84rem;
+    }
+
+    .panel {
+        padding: 8px;
+    }
+
+    #paymentsTable {
+        min-width: 0;
+    }
+
+    #paymentsTable th,
+    #paymentsTable td {
         font-size: 0.72rem;
-        font-weight: 700;
-        letter-spacing: 0.04em;
-        text-transform: uppercase;
-        margin-bottom: 2px;
-    }
-
-    #paymentsTable tbody tr.payments-empty-row td::before {
-        content: none;
-    }
-
-    #paymentsTable tbody tr.pay-confirmed {
-        border-color: rgba(110, 231, 183, 0.44);
-        background: linear-gradient(145deg, rgba(8, 30, 24, 0.78), rgba(8, 18, 34, 0.75));
-    }
-
-    #paymentsTable tbody tr.pay-monitoring {
-        border-color: rgba(251, 191, 36, 0.48);
-        background: linear-gradient(145deg, rgba(44, 30, 8, 0.75), rgba(8, 18, 34, 0.75));
-    }
-
-    #paymentsTable tbody tr.pay-planned {
-        border-color: rgba(147, 197, 253, 0.45);
-        background: linear-gradient(145deg, rgba(8, 24, 44, 0.75), rgba(8, 18, 34, 0.75));
+        padding: 5px 4px;
     }
 }
