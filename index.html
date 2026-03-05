@@ -30,24 +30,32 @@
         <button id="installAppBtn" class="install-app-btn" type="button" hidden>Installa App</button>
         <div class="auth-anchor">
             <button id="authToggleBtn" class="auth-icon-btn" type="button" aria-label="Account">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
+                <img id="authAvatarImg" class="auth-avatar-img" src="" alt="" hidden>
+                <svg id="authAvatarFallback" viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"></path>
                 </svg>
             </button>
             <div id="authPopover" class="auth-popover" hidden>
-                <h3>Account Dashboard</h3>
-                <div class="auth-grid">
+                <h3>Gestione Account</h3>
+                <div id="authProfileSummary" class="auth-profile-summary" hidden>
+                    <img id="authProfileSummaryImg" class="auth-profile-summary-img" src="" alt="" hidden>
+                    <span id="authProfileSummaryName"></span>
+                </div>
+                <div id="authCredentialsGrid" class="auth-grid">
                     <input id="userEmail" type="email" placeholder="Email">
                     <input id="userPassword" type="password" placeholder="Password">
                 </div>
-                <div class="auth-actions">
-                    <button type="button" onclick="registerDashboardUser()">Registrati</button>
-                    <button type="button" onclick="loginDashboardUser()">Login</button>
-                    <button type="button" onclick="logoutDashboardUser()">Logout</button>
+                <div id="authMainActions" class="auth-actions">
+                    <button id="dashboardRegisterBtn" type="button" onclick="registerDashboardUser()">Registrati</button>
+                    <button id="dashboardLoginBtn" type="button" onclick="loginDashboardUser()">Login</button>
+                    <button id="dashboardLogoutBtn" type="button" onclick="logoutDashboardUser()" hidden>Logout</button>
                 </div>
                 <div class="auth-actions auth-link-row">
                     <a href="account-center.html" class="auth-link-btn">Account</a>
-                    <a id="publisherAdminLink" href="publisher.html" class="auth-link-btn" hidden>Publisher</a>
+                    <button id="dashboardLogoutLinkBtn" class="auth-link-btn auth-link-btn-danger" type="button" onclick="logoutDashboardUser()" hidden>Logout</button>
+                </div>
+                <div class="auth-actions auth-link-row auth-publisher-row">
+                    <a id="publisherAdminLink" href="publisher.html" class="auth-link-btn auth-link-btn-publisher" hidden>Publisher</a>
                 </div>
                 <p id="dashboardAuthStatus" class="auth-status">Modalita ospite attiva.</p>
             </div>
@@ -85,7 +93,7 @@
                             <th>Rimborso</th>
                             <th>Maps</th>
                             <th>Google Calendar</th>
-                            <th>-</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody></tbody>

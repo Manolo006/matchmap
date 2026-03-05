@@ -8,52 +8,86 @@
 <link rel="stylesheet" href="account-center.css">
 </head>
 <body>
-<div class="background"></div>
-<main class="page">
-    <header class="hero card">
-        <div class="hero-brand">
-            <img src="img/logo.png" alt="MatchMap logo" class="hero-logo">
+<div class="ac-bg"></div>
+<main class="ac-page">
+    <header class="ac-header ac-card">
+        <div class="ac-brand">
+            <img src="img/logo.png" alt="MatchMap logo" class="ac-logo">
             <div>
-            <h1>Account Center</h1>
-            <p>Gestione account, dati utente e email automatiche Firebase.</p>
+                <h1>Account Center</h1>
+                <p>Profilo personale, accesso e sicurezza account.</p>
             </div>
         </div>
-        <div class="hero-actions">
-            <a href="index.html" class="btn">Home</a>
-        </div>
+        <a href="index.html" class="ac-btn">Torna alla Home</a>
     </header>
 
-    <section class="card">
-        <h2>Autenticazione</h2>
-        <div class="grid two">
+    <section class="ac-card profile-card">
+        <h2>Profilo</h2>
+        <div class="profile-grid">
+            <div class="avatar-block">
+                <img id="profileAvatarPreview" class="avatar-preview" src="img/logo.png" alt="Avatar profilo">
+                <label class="ac-file">
+                    <span>Carica immagine</span>
+                    <input id="profileImageFile" type="file" accept="image/*">
+                </label>
+                <button id="removeAvatarBtn" class="ac-btn ghost" type="button">Rimuovi immagine</button>
+            </div>
+            <div class="profile-fields">
+                <input id="nicknameInput" type="text" placeholder="Nickname" maxlength="40">
+                <div class="pref-region-wrap">
+                    <label for="preferredRegionToggle">Regione preferita news</label>
+                    <div id="preferredRegionCustom" class="pref-region-select">
+                        <button id="preferredRegionToggle" class="pref-region-toggle" type="button" aria-haspopup="listbox" aria-expanded="false">
+                            <span class="pref-region-current">
+                                <img id="preferredRegionLogo" class="pref-region-logo" alt="" hidden>
+                                <span id="preferredRegionLabel">Tutte le regioni (default)</span>
+                            </span>
+                            <span class="pref-region-caret" aria-hidden="true"></span>
+                        </button>
+                        <div id="preferredRegionMenu" class="pref-region-menu" role="listbox" hidden></div>
+                    </div>
+                    <select id="preferredRegionInput" hidden>
+                        <option value="all">Tutte le regioni (default)</option>
+                    </select>
+                </div>
+                <input id="profileImageUrlInput" type="url" placeholder="Oppure incolla URL immagine https://...">
+                <button id="saveProfileBtn" class="ac-btn primary" type="button">Salva Profilo</button>
+                <p id="profileStatus" class="ac-status">Nessuna modifica.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="ac-card">
+        <h2>Accesso</h2>
+        <div class="ac-grid two">
             <input id="authEmail" type="email" placeholder="Email">
             <input id="authPassword" type="password" placeholder="Password">
         </div>
-        <div class="actions">
-            <button id="registerBtn" class="btn primary" type="button">Registrati</button>
-            <button id="loginBtn" class="btn primary" type="button">Login</button>
-            <button id="logoutBtn" class="btn" type="button">Logout</button>
+        <div class="ac-actions">
+            <button id="registerBtn" class="ac-btn primary" type="button">Registrati</button>
+            <button id="loginBtn" class="ac-btn primary" type="button">Login</button>
+            <button id="logoutBtn" class="ac-btn" type="button">Logout</button>
         </div>
-        <p id="authStatus" class="status">In attesa.</p>
+        <p id="authStatus" class="ac-status">In attesa.</p>
     </section>
 
-    <section class="card">
-        <h2>Stato Account</h2>
-        <div id="accountInfo" class="kv"></div>
+    <section class="ac-card">
+        <h2>Dati Account</h2>
+        <div id="accountInfo" class="ac-kv"></div>
     </section>
 
-    <section class="card">
-        <h2>Sicurezza Account</h2>
-        <div class="grid two">
+    <section class="ac-card">
+        <h2>Sicurezza</h2>
+        <div class="ac-grid two">
             <input id="resetEmailInput" type="email" placeholder="Email per reset password">
             <input id="newEmailInput" type="email" placeholder="Nuova email account loggato">
         </div>
-        <div class="actions">
-            <button id="sendResetBtn" class="btn primary" type="button">Invia Reset Password</button>
-            <button id="changeEmailBtn" class="btn" type="button">Modifica Email</button>
-            <button id="deleteAccountBtn" class="btn danger" type="button">Elimina Account</button>
+        <div class="ac-actions">
+            <button id="sendResetBtn" class="ac-btn primary" type="button">Invia Reset Password</button>
+            <button id="changeEmailBtn" class="ac-btn" type="button">Modifica Email</button>
+            <button id="deleteAccountBtn" class="ac-btn danger" type="button">Elimina Account</button>
         </div>
-        <p id="emailStatus" class="status">Nessuna operazione.</p>
+        <p id="emailStatus" class="ac-status">Nessuna operazione.</p>
     </section>
 </main>
 

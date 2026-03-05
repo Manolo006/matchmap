@@ -22,22 +22,28 @@
             </div>
             <div class="auth-anchor">
                 <button id="publisherAuthToggleBtn" class="auth-icon-btn" type="button" aria-label="Account">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <img id="publisherAuthAvatarImg" class="auth-avatar-img" src="" alt="" hidden>
+                    <svg id="publisherAuthAvatarFallback" viewBox="0 0 24 24" aria-hidden="true">
                         <path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"></path>
                     </svg>
                 </button>
                 <div id="publisherAuthPopover" class="auth-popover" hidden>
-                    <h3>Account Firebase</h3>
-                    <div class="grid">
+                    <h3>Gestione Account</h3>
+                    <div id="publisherAuthProfileSummary" class="auth-profile-summary" hidden>
+                        <img id="publisherAuthProfileSummaryImg" class="auth-profile-summary-img" src="" alt="" hidden>
+                        <span id="publisherAuthProfileSummaryName"></span>
+                    </div>
+                    <div id="publisherCredentialsGrid" class="grid">
                         <input id="loginEmail" type="email" placeholder="Email admin">
                         <input id="loginPassword" type="password" placeholder="Password admin">
                     </div>
-                    <div class="actions">
+                    <div id="publisherMainAuthActions" class="actions">
                         <button id="loginBtn" class="primary" type="button">Login</button>
                         <button id="logoutBtn" type="button">Logout</button>
                     </div>
                     <div class="actions account-link-row">
                         <a href="account-center.html" class="auth-link-btn">Account Center</a>
+                        <button id="publisherLogoutLinkBtn" class="auth-link-btn auth-link-btn-danger" type="button" hidden>Logout</button>
                     </div>
                     <p id="authStatus" class="muted">Non autenticato</p>
                 </div>

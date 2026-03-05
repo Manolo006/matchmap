@@ -242,6 +242,16 @@ button:hover {
     fill: currentColor;
 }
 
+.auth-avatar-img {
+    width: 100%;
+    height: 100%;
+    border-radius: 999px;
+    object-fit: cover;
+    object-position: center;
+    display: block;
+    transform: scale(1.06);
+}
+
 .auth-popover {
     position: absolute;
     right: 0;
@@ -260,6 +270,27 @@ button:hover {
     font-size: 0.98rem;
 }
 
+.auth-profile-summary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 1.04rem;
+}
+
+.auth-profile-summary-img {
+    width: 38px;
+    height: 38px;
+    border-radius: 999px;
+    object-fit: cover;
+    object-position: center;
+    border: 1px solid rgba(159, 178, 221, 0.35);
+    transform: scale(1.06);
+}
+
 .auth-popover .auth-grid {
     grid-template-columns: 1fr;
 }
@@ -270,15 +301,15 @@ button:hover {
 
 .auth-popover .auth-actions {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
     margin-top: 10px;
 }
 
 .auth-popover .auth-actions button {
     width: 100%;
-    padding: 9px 10px;
-    font-size: 0.9rem;
+    padding: 7px 9px;
+    font-size: 0.84rem;
     min-width: 0;
 }
 
@@ -287,16 +318,16 @@ button:hover {
     text-align: center;
     border: 1px solid transparent;
     border-radius: 999px;
-    padding: 9px 10px;
+    padding: 7px 9px;
     color: #091225;
     text-decoration: none;
-    font-size: 0.9rem;
+    font-size: 0.84rem;
     font-weight: 600;
     background: linear-gradient(120deg, var(--accent), #7cd8f4);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 42px;
+    min-height: 36px;
     padding-inline: 8px;
     line-height: 1;
     white-space: nowrap;
@@ -391,6 +422,53 @@ textarea:focus {
     font-size: 1.1rem;
     color: var(--good);
     font-weight: 600;
+}
+
+.dashboard-totals {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.total-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    font-size: 0.88rem;
+    font-weight: 700;
+    line-height: 1;
+}
+
+.total-chip svg {
+    width: 14px;
+    height: 14px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.chip-total {
+    color: #d8ecff;
+    background: rgba(59, 130, 246, 0.22);
+    border-color: rgba(147, 197, 253, 0.55);
+}
+
+.chip-paid {
+    color: #e6fff3;
+    background: rgba(34, 197, 94, 0.25);
+    border-color: rgba(110, 231, 183, 0.62);
+}
+
+.chip-unpaid {
+    color: #ffe7eb;
+    background: rgba(244, 63, 94, 0.22);
+    border-color: rgba(251, 113, 133, 0.56);
 }
 
 .dashboard-more-wrap {
@@ -511,6 +589,31 @@ a:hover {
     box-shadow: 0 6px 16px rgba(0, 0, 0, 0.22);
     transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
     outline: none;
+}
+
+.auth-link-btn-danger {
+    color: #ffe5ea;
+    background: linear-gradient(120deg, #ef4444, #f43f5e);
+}
+
+.auth-link-btn-danger:hover,
+.auth-link-btn-danger:focus,
+.auth-link-btn-danger:active,
+.auth-link-btn-danger:visited {
+    color: #fff0f3;
+    background: linear-gradient(120deg, #ef4444, #f43f5e);
+}
+
+.auth-link-btn-publisher {
+    background: linear-gradient(120deg, #6ee7b7, #4cc9f0);
+}
+
+.auth-publisher-row {
+    grid-template-columns: 1fr;
+}
+
+.auth-publisher-row .auth-link-btn {
+    width: 100%;
 }
 
 .news-filters select option,
@@ -815,6 +918,34 @@ a:hover {
     justify-content: center;
 }
 
+.event-paid-btn {
+    min-width: 34px;
+    min-height: 34px;
+    padding: 7px 10px;
+    color: #d9ebff;
+    background: linear-gradient(120deg, #3b82f6, #2563eb);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 0;
+}
+
+.event-paid-btn.is-paid {
+    color: #e6fff3;
+    background: linear-gradient(120deg, #22c55e, #16a34a);
+}
+
+.event-paid-btn svg {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    display: block;
+}
+
 .event-remove-btn svg {
     width: 18px;
     height: 18px;
@@ -824,6 +955,21 @@ a:hover {
     stroke-linecap: round;
     stroke-linejoin: round;
     display: block;
+}
+
+#eventTable tbody tr.event-paid-row td,
+#eventTable tbody tr.event-unpaid-row td {
+    background: transparent;
+}
+
+#eventTable th:nth-child(8),
+#eventTable td:nth-child(8) {
+    min-width: 96px;
+    white-space: nowrap;
+}
+
+#eventTable td:nth-child(8) {
+    text-align: right;
 }
 
 .icon-link {
@@ -1258,20 +1404,37 @@ a:hover {
         display: flex;
         justify-content: flex-end;
         align-items: center;
+        gap: 8px;
+        flex-wrap: nowrap;
         padding-top: 8px;
+        min-width: 96px;
     }
 
     #eventTable td:nth-child(8)::before {
-        margin: 0 auto 0 0;
+        content: none;
+        display: none;
     }
 
     #eventTable td:nth-child(8) .event-remove-btn {
         min-width: 44px;
         min-height: 44px;
         padding: 0;
+        margin: 0;
+    }
+
+    #eventTable td:nth-child(8) .event-paid-btn {
+        min-width: 44px;
+        min-height: 44px;
+        padding: 0;
+        margin: 0;
     }
 
     #eventTable td:nth-child(8) .event-remove-btn svg {
+        width: 20px;
+        height: 20px;
+    }
+
+    #eventTable td:nth-child(8) .event-paid-btn svg {
         width: 20px;
         height: 20px;
     }

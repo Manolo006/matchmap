@@ -116,6 +116,16 @@ body {
     fill: currentColor;
 }
 
+.auth-avatar-img {
+    width: 100%;
+    height: 100% !important;
+    border-radius: 999px;
+    object-fit: cover;
+    object-position: center;
+    display: block;
+    transform: scale(1.05);
+}
+
 .auth-popover {
     position: absolute;
     right: 0;
@@ -132,6 +142,27 @@ body {
 .auth-popover h3 {
     margin: 0 0 10px;
     font-size: 0.98rem;
+}
+
+.auth-profile-summary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    color: #ffffff;
+    font-weight: 700;
+    font-size: 1.02rem;
+}
+
+.auth-profile-summary-img {
+    width: 36px;
+    height: 36px !important;
+    border-radius: 999px;
+    object-fit: cover;
+    object-position: center;
+    border: 1px solid rgba(155, 176, 216, 0.35);
+    transform: scale(1.05);
 }
 
 .page-tabs {
@@ -315,6 +346,12 @@ button.primary {
     color: #081426;
     border-color: transparent;
     background: linear-gradient(120deg, var(--accent), var(--ok));
+}
+
+.auth-link-btn-danger {
+    color: #ffe5ea;
+    border-color: transparent;
+    background: linear-gradient(120deg, #ef4444, #f43f5e);
 }
 
 button:hover {

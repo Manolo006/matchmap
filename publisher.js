@@ -110,6 +110,14 @@ const loginPassword = document.getElementById('loginPassword');
 const loginBtn = document.getElementById('loginBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 const authStatus = document.getElementById('authStatus');
+const publisherAuthAvatarImg = document.getElementById('publisherAuthAvatarImg');
+const publisherAuthAvatarFallback = document.getElementById('publisherAuthAvatarFallback');
+const publisherAuthProfileSummary = document.getElementById('publisherAuthProfileSummary');
+const publisherAuthProfileSummaryImg = document.getElementById('publisherAuthProfileSummaryImg');
+const publisherAuthProfileSummaryName = document.getElementById('publisherAuthProfileSummaryName');
+const publisherCredentialsGrid = document.getElementById('publisherCredentialsGrid');
+const publisherMainAuthActions = document.getElementById('publisherMainAuthActions');
+const publisherLogoutLinkBtn = document.getElementById('publisherLogoutLinkBtn');
 const accessDeniedCard = document.getElementById('publisherAccessDenied');
 
 function getFirebaseState() {
@@ -164,6 +172,92 @@ function pickFirst(obj, keys) {
 function setAuthStatus(message, ok = false) {
     authStatus.textContent = message;
     authStatus.className = ok ? 'status ok' : 'muted';
+}
+
+function setPublisherAuthAvatar(avatarUrl) {
+    if (!publisherAuthAvatarImg || !publisherAuthAvatarFallback) {
+        return;
+    }
+    const value = String(avatarUrl || '').trim();
+    if (!value) {
+        publisherAuthAvatarImg.hidden = true;
+        publisherAuthAvatarImg.removeAttribute('src');
+        publisherAuthAvatarFallback.hidden = false;
+        return;
+    }
+    publisherAuthAvatarImg.src = value;
+    publisherAuthAvatarImg.hidden = false;
+    publisherAuthAvatarFallback.hidden = true;
+}
+
+function setPublisherAuthProfileSummary(user, profile = {}) {
+    if (!publisherAuthProfileSummary || !publisherAuthProfileSummaryImg || !publisherAuthProfileSummaryName) {
+        return;
+    }
+    if (!user) {
+        publisherAuthProfileSummary.hidden = true;
+        publisherAuthProfileSummaryName.textContent = '';
+        publisherAuthProfileSummaryImg.hidden = true;
+        publisherAuthProfileSummaryImg.removeAttribute('src');
+        return;
+    }
+
+    const nickname = String(profile?.nickname || user.displayName || user.email || '').trim() || 'Utente';
+    const avatar = String(profile?.avatarUrl || user.photoURL || '').trim();
+    publisherAuthProfileSummaryName.textContent = nickname;
+    if (avatar) {
+        publisherAuthProfileSummaryImg.src = avatar;
+        publisherAuthProfileSummaryImg.hidden = false;
+    } else {
+        publisherAuthProfileSummaryImg.hidden = true;
+        publisherAuthProfileSummaryImg.removeAttribute('src');
+    }
+    publisherAuthProfileSummary.hidden = false;
+}
+
+function setPublisherAuthControlsVisibility(user) {
+    const isLogged = Boolean(user);
+    if (publisherCredentialsGrid) {
+        publisherCredentialsGrid.hidden = isLogged;
+        publisherCredentialsGrid.style.display = isLogged ? 'none' : '';
+    }
+    if (publisherMainAuthActions) {
+        publisherMainAuthActions.hidden = isLogged;
+        publisherMainAuthActions.style.display = isLogged ? 'none' : '';
+    }
+    if (logoutBtn) {
+        logoutBtn.hidden = true;
+        logoutBtn.style.display = 'none';
+    }
+    if (publisherLogoutLinkBtn) {
+        publisherLogoutLinkBtn.hidden = !isLogged;
+        publisherLogoutLinkBtn.style.display = isLogged ? 'inline-flex' : 'none';
+    }
+}
+
+async function loadPublisherUserProfile(user) {
+    if (!user) {
+        setPublisherAuthAvatar('');
+        setPublisherAuthProfileSummary(null, {});
+        return { nickname: '', avatarUrl: '' };
+    }
+    const fb = getFirebaseState();
+    let profile = {};
+    try {
+        if (fb?.ready && fb.db) {
+            const snap = await fb.db.ref(`users/${user.uid}/profile`).once('value');
+            if (snap.exists()) {
+                profile = snap.val() || {};
+            }
+        }
+    } catch {}
+    const avatar = String(profile?.avatarUrl || user.photoURL || '').trim();
+    setPublisherAuthAvatar(avatar);
+    setPublisherAuthProfileSummary(user, profile);
+    return {
+        nickname: String(profile?.nickname || user.displayName || '').trim(),
+        avatarUrl: avatar
+    };
 }
 
 function isPublisherAdmin(user) {
@@ -1251,20 +1345,27 @@ async function firebaseLogout() {
 
 function bindAuthState() {
     const fb = getFirebaseState();
+    setPublisherAuthControlsVisibility(null);
+    setPublisherAuthAvatar('');
+    setPublisherAuthProfileSummary(null, {});
     if (!fb.ready || !fb.auth) {
         setAuthStatus('Firebase non disponibile', false);
         setPublisherAccess(false);
         return;
     }
 
-    fb.auth.onAuthStateChanged(user => {
+    fb.auth.onAuthStateChanged(async user => {
+        setPublisherAuthControlsVisibility(user);
+        const profile = await loadPublisherUserProfile(user);
         const isAdmin = isPublisherAdmin(user);
         setPublisherAccess(isAdmin);
 
         if (user && isAdmin) {
-            setAuthStatus(`Autenticato admin: ${user.email}`, true);
+            const label = String(profile?.nickname || user.displayName || user.email || '').trim();
+            setAuthStatus(`Autenticato admin: ${label}`, true);
         } else if (user) {
-            setAuthStatus(`Accesso negato per ${user.email}`, false);
+            const label = String(profile?.nickname || user.displayName || user.email || '').trim();
+            setAuthStatus(`Accesso negato per ${label}`, false);
         } else {
             setAuthStatus('Non autenticato', false);
         }
@@ -1671,6 +1772,9 @@ if (paymentsLoadBtn) {
 
 loginBtn.addEventListener('click', firebaseLogin);
 logoutBtn.addEventListener('click', firebaseLogout);
+if (publisherLogoutLinkBtn) {
+    publisherLogoutLinkBtn.addEventListener('click', firebaseLogout);
+}
 if (suggestionsLoadBtn) {
     suggestionsLoadBtn.addEventListener('click', () => loadSuggestionsFromFirebase(false));
 }
@@ -1721,4 +1825,14 @@ async function initPublisher() {
 }
 
 initPublisher();
+
+if (publisherAuthAvatarImg) {
+    publisherAuthAvatarImg.addEventListener('error', () => setPublisherAuthAvatar(''));
+}
+if (publisherAuthProfileSummaryImg) {
+    publisherAuthProfileSummaryImg.addEventListener('error', () => {
+        publisherAuthProfileSummaryImg.hidden = true;
+        publisherAuthProfileSummaryImg.removeAttribute('src');
+    });
+}
 

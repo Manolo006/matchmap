@@ -852,13 +852,141 @@ function setPublisherAdminLinkVisible(isVisible) {
     }
 }
 
+function setDashboardAuthAvatar(avatarUrl) {
+    const avatarImg = document.getElementById('authAvatarImg');
+    const fallbackIcon = document.getElementById('authAvatarFallback');
+    if (!avatarImg || !fallbackIcon) {
+        return;
+    }
+    const value = String(avatarUrl || '').trim();
+    if (!value) {
+        avatarImg.hidden = true;
+        avatarImg.removeAttribute('src');
+        fallbackIcon.hidden = false;
+        return;
+    }
+    avatarImg.src = value;
+    avatarImg.hidden = false;
+    fallbackIcon.hidden = true;
+}
+
+function setDashboardProfileSummary(user, profile = {}) {
+    const summaryWrap = document.getElementById('authProfileSummary');
+    const summaryImg = document.getElementById('authProfileSummaryImg');
+    const summaryName = document.getElementById('authProfileSummaryName');
+    if (!summaryWrap || !summaryImg || !summaryName) {
+        return;
+    }
+
+    if (!user) {
+        summaryWrap.hidden = true;
+        summaryName.textContent = '';
+        summaryImg.hidden = true;
+        summaryImg.removeAttribute('src');
+        return;
+    }
+
+    const nickname = String(profile?.nickname || user.displayName || user.email || '').trim();
+    const avatar = String(profile?.avatarUrl || user.photoURL || '').trim();
+    summaryName.textContent = nickname || 'Utente';
+    if (avatar) {
+        summaryImg.src = avatar;
+        summaryImg.hidden = false;
+    } else {
+        summaryImg.hidden = true;
+        summaryImg.removeAttribute('src');
+    }
+    summaryWrap.hidden = false;
+}
+
+async function syncDashboardAuthProfile(user) {
+    if (!user) {
+        setDashboardAuthAvatar('');
+        setDashboardProfileSummary(null, {});
+        return { nickname: '', avatarUrl: '', preferredRegion: 'all' };
+    }
+    let profile = {};
+    try {
+        const fb = window.matchMapFirebase;
+        if (fb?.ready && fb.db) {
+            const snap = await fb.db.ref(`users/${user.uid}/profile`).once('value');
+            if (snap.exists()) {
+                profile = snap.val() || {};
+            }
+        }
+    } catch {}
+
+    const avatarCandidate = String(profile?.avatarUrl || '').trim() || String(user.photoURL || '').trim();
+    setDashboardProfileSummary(user, profile);
+    setDashboardAuthAvatar(avatarCandidate);
+    return {
+        nickname: String(profile?.nickname || user.displayName || '').trim(),
+        avatarUrl: String(profile?.avatarUrl || '').trim(),
+        preferredRegion: String(profile?.preferredRegion || 'all').trim() || 'all'
+    };
+}
+
+function setDashboardAuthButtonsVisibility(user) {
+    const registerBtn = document.getElementById('dashboardRegisterBtn');
+    const loginBtn = document.getElementById('dashboardLoginBtn');
+    const logoutBtn = document.getElementById('dashboardLogoutBtn');
+    const logoutLinkBtn = document.getElementById('dashboardLogoutLinkBtn');
+    const credentialsGrid = document.getElementById('authCredentialsGrid');
+    const mainActions = document.getElementById('authMainActions');
+    if (!registerBtn || !loginBtn || !logoutBtn || !logoutLinkBtn || !credentialsGrid || !mainActions) {
+        return;
+    }
+    const isLogged = Boolean(user);
+    registerBtn.hidden = isLogged;
+    loginBtn.hidden = isLogged;
+    logoutBtn.hidden = true;
+    logoutLinkBtn.hidden = !isLogged;
+    credentialsGrid.hidden = isLogged;
+    mainActions.hidden = isLogged;
+    registerBtn.style.display = isLogged ? 'none' : '';
+    loginBtn.style.display = isLogged ? 'none' : '';
+    logoutBtn.style.display = 'none';
+    logoutLinkBtn.style.display = isLogged ? 'inline-flex' : 'none';
+    credentialsGrid.style.display = isLogged ? 'none' : '';
+    mainActions.style.display = isLogged ? 'none' : '';
+}
+
 function getCurrentDashboardUser() {
     const { fb } = getDashboardAuthState();
     return fb?.ready && fb.auth ? fb.auth.currentUser : null;
 }
 
+function normalizeDashboardEvent(raw) {
+    const item = raw || {};
+    return {
+        ...item,
+        pagata: Boolean(item.pagata)
+    };
+}
+
 function computeTotalRimborso() {
     return dashboardEvents.reduce((sum, e) => sum + Number(e.rimborso || 0), 0);
+}
+
+function computeDashboardPaymentStats() {
+    return dashboardEvents.reduce((acc, evento) => {
+        const rimborso = Number(evento?.rimborso || 0);
+        acc.total += rimborso;
+        if (evento?.pagata) {
+            acc.paidTotal += rimborso;
+            acc.paidCount += 1;
+        } else {
+            acc.unpaidTotal += rimborso;
+            acc.unpaidCount += 1;
+        }
+        return acc;
+    }, {
+        total: 0,
+        paidTotal: 0,
+        unpaidTotal: 0,
+        paidCount: 0,
+        unpaidCount: 0
+    });
 }
 
 function parseEventoDateTime(evento) {
@@ -905,6 +1033,7 @@ function buildDashboardEventRow(item) {
     const calendarText = `${evento.categoria}: ${evento.squadre}`;
     const calendarDetails = buildCalendarDescription(evento);
     const row = document.createElement('tr');
+    row.classList.add(evento.pagata ? 'event-paid-row' : 'event-unpaid-row');
     row.innerHTML = `
             <td>${evento.data}</td>
             <td>${evento.ora}</td>
@@ -922,6 +1051,11 @@ function buildDashboardEventRow(item) {
                 </a>
             </td>
             <td>
+                <button type="button" class="event-paid-btn ${evento.pagata ? 'is-paid' : ''}" onclick="toggleDashboardEventPaid(${item.index})" aria-label="${evento.pagata ? 'Segna non pagata' : 'Segna pagata'}" title="${evento.pagata ? 'Segna non pagata' : 'Segna pagata'}">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M20 6L9 17l-5-5"></path>
+                    </svg>
+                </button>
                 <button type="button" class="event-remove-btn" onclick="removeDashboardEvent(${item.index})" aria-label="Elimina evento" title="Elimina evento">
                     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                         <path d="M3 6h18"></path>
@@ -988,10 +1122,24 @@ function renderDashboardEvents() {
 
     updateDashboardShowMoreControls(hiddenItems.length);
 
-    const total = computeTotalRimborso();
+    const stats = computeDashboardPaymentStats();
     const totalEl = document.getElementById('rimborsoTotale');
     if (totalEl) {
-        totalEl.textContent = `Rimborso totale: ${total} \u20AC`;
+        totalEl.classList.add('dashboard-totals');
+        totalEl.innerHTML = `
+            <span class="total-chip chip-total" title="Totale rimborsi">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4z"></path><path d="M8 9h8"></path><path d="M8 12h8"></path><path d="M8 15h5"></path></svg>
+                <span>${stats.total} \u20AC</span>
+            </span>
+            <span class="total-chip chip-paid" title="Partite pagate">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6L9 17l-5-5"></path></svg>
+                <span>${stats.paidTotal} \u20AC</span>
+            </span>
+            <span class="total-chip chip-unpaid" title="Da pagare">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18v10H3z"></path><path d="M7 12h5"></path><circle cx="17" cy="12" r="2"></circle></svg>
+                <span>${stats.unpaidTotal} \u20AC (${stats.unpaidCount})</span>
+            </span>
+        `;
     }
 }
 
@@ -1169,19 +1317,29 @@ async function removeDashboardEvent(index) {
     await persistDashboardEvents();
 }
 
+async function toggleDashboardEventPaid(index) {
+    if (index < 0 || index >= dashboardEvents.length) {
+        return;
+    }
+    dashboardEvents[index].pagata = !Boolean(dashboardEvents[index].pagata);
+    renderDashboardEvents();
+    await persistDashboardEvents();
+}
+
 async function persistDashboardEvents() {
     const user = getCurrentDashboardUser();
+    const payload = dashboardEvents.map(normalizeDashboardEvent);
     if (user) {
         const { fb } = getDashboardAuthState();
         try {
-            await fb.db.ref(`users/${user.uid}/dashboard/events`).set(dashboardEvents);
+            await fb.db.ref(`users/${user.uid}/dashboard/events`).set(payload);
             return;
         } catch (error) {
             console.warn('Errore salvataggio cloud dashboard:', error.message);
         }
     }
 
-    localStorage.setItem(GUEST_EVENTS_STORAGE_KEY, JSON.stringify(dashboardEvents));
+    localStorage.setItem(GUEST_EVENTS_STORAGE_KEY, JSON.stringify(payload));
 }
 
 async function loadDashboardEvents() {
@@ -1191,7 +1349,8 @@ async function loadDashboardEvents() {
         try {
             const snap = await fb.db.ref(`users/${user.uid}/dashboard/events`).once('value');
             const raw = snap.exists() ? snap.val() : [];
-            dashboardEvents = Array.isArray(raw) ? raw : Object.values(raw || {});
+            const list = Array.isArray(raw) ? raw : Object.values(raw || {});
+            dashboardEvents = list.map(normalizeDashboardEvent);
             renderDashboardEvents();
             return;
         } catch (error) {
@@ -1201,7 +1360,7 @@ async function loadDashboardEvents() {
 
     try {
         const raw = JSON.parse(localStorage.getItem(GUEST_EVENTS_STORAGE_KEY) || '[]');
-        dashboardEvents = Array.isArray(raw) ? raw : [];
+        dashboardEvents = (Array.isArray(raw) ? raw : []).map(normalizeDashboardEvent);
     } catch (error) {
         dashboardEvents = [];
     }
@@ -1223,7 +1382,7 @@ async function aggiungiEvento() {
         return;
     }
 
-    dashboardEvents.push(evento);
+    dashboardEvents.push(normalizeDashboardEvent(evento));
     renderDashboardEvents();
     await persistDashboardEvents();
     await autoSuggestFieldFromDesignazione(evento);
@@ -1244,6 +1403,9 @@ function formatDataGoogle(data, ora) {
 
 /* NEWS PER REGIONE */
 let newsDb = [];
+let preferredNewsRegion = 'all';
+let newsFilterManuallyChanged = false;
+let setNewsRegionSelection = null;
 
 function normalizeNewsPayload(payload) {
     if (Array.isArray(payload)) {
@@ -1361,6 +1523,52 @@ function renderNews(selectedRegion = 'all') {
     });
 }
 
+function resolveNewsRegionValue(value, options = []) {
+    const target = normalizeText(value);
+    if (!target || target === 'all' || target === 'tutte le regioni') {
+        return 'all';
+    }
+    const match = options.find(option => normalizeText(option.value) === target);
+    return match ? match.value : 'all';
+}
+
+function applyPreferredNewsRegion(force = false) {
+    if (!setNewsRegionSelection) {
+        return;
+    }
+    if (newsFilterManuallyChanged && !force) {
+        return;
+    }
+    setNewsRegionSelection(preferredNewsRegion || 'all', false);
+}
+
+async function loadPreferredNewsRegionForUser(user, profilePreferredRegion = null) {
+    preferredNewsRegion = 'all';
+    if (!user) {
+        applyPreferredNewsRegion(true);
+        return;
+    }
+    if (profilePreferredRegion && String(profilePreferredRegion).trim()) {
+        preferredNewsRegion = String(profilePreferredRegion).trim();
+        applyPreferredNewsRegion(true);
+        return;
+    }
+    const fb = window.matchMapFirebase;
+    if (!fb?.ready || !fb.db) {
+        applyPreferredNewsRegion(true);
+        return;
+    }
+    try {
+        const snap = await fb.db.ref(`users/${user.uid}/profile/preferredRegion`).once('value');
+        if (snap.exists()) {
+            preferredNewsRegion = String(snap.val() || 'all').trim() || 'all';
+        }
+    } catch {
+        preferredNewsRegion = 'all';
+    }
+    applyPreferredNewsRegion(true);
+}
+
 function setupNewsRegionFilter() {
     const select = document.getElementById('regionFilter');
     const customWrap = document.getElementById('regionFilterCustom');
@@ -1402,8 +1610,9 @@ function setupNewsRegionFilter() {
         menu.hidden = false;
         toggleBtn.setAttribute('aria-expanded', 'true');
     };
-    const setSelection = (value) => {
-        const selected = options.find(x => String(x.value) === String(value)) || options[0];
+    const setSelection = (value, manual = false) => {
+        const resolvedValue = resolveNewsRegionValue(value, options);
+        const selected = options.find(x => String(x.value) === String(resolvedValue)) || options[0];
         select.value = selected.value;
         labelEl.textContent = selected.label;
         if (selected.logo) {
@@ -1419,6 +1628,9 @@ function setupNewsRegionFilter() {
             const isActive = btn.getAttribute('data-value') === String(selected.value);
             btn.classList.toggle('is-active', isActive);
         });
+        if (manual) {
+            newsFilterManuallyChanged = true;
+        }
         renderNews(selected.value);
     };
 
@@ -1453,7 +1665,7 @@ function setupNewsRegionFilter() {
             return;
         }
         const value = btn.getAttribute('data-value') || 'all';
-        setSelection(value);
+        setSelection(value, true);
         closeMenu();
     };
 
@@ -1463,7 +1675,11 @@ function setupNewsRegionFilter() {
         }
     });
 
+    setNewsRegionSelection = (value, manual = false) => {
+        setSelection(value, manual);
+    };
     setSelection(select.value || 'all');
+    applyPreferredNewsRegion(true);
 }
 
 /* TABELLA PAGAMENTI */
@@ -1683,6 +1899,9 @@ async function logoutDashboardUser() {
 function initDashboardAuth() {
     const fb = window.matchMapFirebase;
     setPublisherAdminLinkVisible(false);
+    setDashboardAuthButtonsVisibility(null);
+    setDashboardAuthAvatar('');
+    setDashboardProfileSummary(null, {});
     if (!fb?.ready || !fb.auth) {
         setDashboardAuthStatus('Modalita ospite attiva (Firebase non disponibile).');
         loadDashboardEvents();
@@ -1691,14 +1910,19 @@ function initDashboardAuth() {
 
     fb.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
     fb.auth.onAuthStateChanged(async user => {
+        setDashboardAuthButtonsVisibility(user);
+        const profile = await syncDashboardAuthProfile(user);
+        await loadPreferredNewsRegionForUser(user, profile?.preferredRegion);
         if (!user) {
             setDashboardAuthStatus('Modalita ospite attiva.');
             setPublisherAdminLinkVisible(false);
         } else if (isDashboardAdmin(user)) {
-            setDashboardAuthStatus(`Connesso come ${user.email}`, true);
+            const label = String(profile?.nickname || user.displayName || user.email || '').trim();
+            setDashboardAuthStatus(`Connesso come ${label}`, true);
             setPublisherAdminLinkVisible(true);
         } else {
-            setDashboardAuthStatus(`Connesso come ${user.email} (no admin).`);
+            const label = String(profile?.nickname || user.displayName || user.email || '').trim();
+            setDashboardAuthStatus(`Connesso come ${label}`);
             setPublisherAdminLinkVisible(false);
         }
         await loadDashboardEvents();
@@ -1898,6 +2122,7 @@ window.registerDashboardUser = registerDashboardUser;
 window.loginDashboardUser = loginDashboardUser;
 window.logoutDashboardUser = logoutDashboardUser;
 window.removeDashboardEvent = removeDashboardEvent;
+window.toggleDashboardEventPaid = toggleDashboardEventPaid;
 window.submitUserSuggestion = submitUserSuggestion;
 window.searchSuggestionPlace = searchSuggestionPlace;
 window.searchMapPlaceFromBar = searchMapPlaceFromBar;
@@ -1984,7 +2209,7 @@ if (mapQuickSearchSuggestions) {
 loadLuoghiDb();
 Promise.all([loadNewsDb(), loadPaymentsDb()]).then(() => {
     setupNewsRegionFilter();
-    renderNews('all');
+    applyPreferredNewsRegion(true);
     renderPaymentsTable();
 });
 initDashboardAuth();
@@ -1992,4 +2217,19 @@ setupAuthPopover();
 ensureDashboardEventAutoRefresh();
 registerServiceWorker();
 setupInstallApp();
+
+const authAvatarImg = document.getElementById('authAvatarImg');
+if (authAvatarImg) {
+    authAvatarImg.addEventListener('error', () => {
+        setDashboardAuthAvatar('');
+    });
+}
+
+const authProfileSummaryImg = document.getElementById('authProfileSummaryImg');
+if (authProfileSummaryImg) {
+    authProfileSummaryImg.addEventListener('error', () => {
+        authProfileSummaryImg.hidden = true;
+        authProfileSummaryImg.removeAttribute('src');
+    });
+}
 
