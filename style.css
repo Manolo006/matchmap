@@ -165,6 +165,64 @@ button:hover {
     position: relative;
 }
 
+.header-actions {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.install-app-btn {
+    min-height: 42px;
+    padding: 10px 14px;
+    border-radius: 999px;
+    color: #0c172f;
+    background: linear-gradient(120deg, #7ce9ff, #8af0be);
+    font-size: 0.84rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.install-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 2500;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 14px;
+    background: rgba(3, 9, 20, 0.76);
+    pointer-events: auto;
+}
+
+.install-modal.open {
+    display: flex;
+}
+
+.install-modal-card {
+    width: min(100%, 360px);
+    padding: 16px;
+    border-radius: 16px;
+    border: 1px solid rgba(159, 178, 221, 0.35);
+    background: rgba(8, 16, 31, 0.96);
+    pointer-events: auto;
+}
+
+.install-modal-card h3 {
+    margin: 0 0 8px;
+    font-size: 1rem;
+}
+
+.install-modal-card p {
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.35;
+}
+
+.install-modal-close {
+    margin-top: 12px;
+    touch-action: manipulation;
+}
+
 .auth-icon-btn {
     width: 42px;
     height: 42px;
@@ -1045,6 +1103,11 @@ a:hover {
         flex-direction: column;
     }
 
+    .header-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+
     .app-brand {
         align-items: center;
     }
@@ -1096,6 +1159,18 @@ a:hover {
         width: 100%;
         min-height: 44px;
         font-size: clamp(0.88rem, 3.8vw, 0.98rem);
+    }
+
+    .header-actions {
+        width: 100%;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .install-app-btn {
+        min-height: 40px;
+        padding: 9px 12px;
+        font-size: 0.8rem;
     }
 
     .map-search-bar {

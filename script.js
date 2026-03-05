@@ -18,6 +18,7 @@ let mapSearchSuggestions = [];
 let mapSearchActiveIndex = -1;
 let mapSearchHideTimer = null;
 let mapSearchLastEnterTs = 0;
+let deferredInstallPrompt = null;
 const TEAM_LOGO_FALLBACK_PATH = 'img/logo.png';
 const teamLogoUrlCache = new Map();
 const DASHBOARD_ADMIN_EMAILS = new Set(['manuelcarpita@gmail.com']);
@@ -994,6 +995,132 @@ function renderDashboardEvents() {
     }
 }
 
+function isIosDevice() {
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPad|iPhone|iPod/.test(ua);
+    const isMacTouch = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
+    return isIOS || isMacTouch;
+}
+
+function isStandaloneMode() {
+    const standaloneByMedia = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+    const standaloneByNavigator = Boolean(window.navigator.standalone);
+    return standaloneByMedia || standaloneByNavigator;
+}
+
+function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) {
+        return;
+    }
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+    });
+}
+
+function setupInstallApp() {
+    const installBtn = document.getElementById('installAppBtn');
+    const iosModal = document.getElementById('iosInstallModal');
+    const closeModalBtn = document.getElementById('closeInstallModalBtn');
+    if (!installBtn) {
+        return;
+    }
+
+    const refreshInstallButton = () => {
+        if (isStandaloneMode()) {
+            installBtn.hidden = true;
+            return;
+        }
+        if (deferredInstallPrompt || isIosDevice()) {
+            installBtn.hidden = false;
+            return;
+        }
+        installBtn.hidden = true;
+    };
+
+    window.addEventListener('beforeinstallprompt', event => {
+        event.preventDefault();
+        deferredInstallPrompt = event;
+        refreshInstallButton();
+    });
+
+    window.addEventListener('appinstalled', () => {
+        deferredInstallPrompt = null;
+        installBtn.hidden = true;
+        showDashboardToast('App installata con successo.', 'ok');
+    });
+
+    const openInstallModal = () => {
+        if (!iosModal) {
+            return;
+        }
+        iosModal.classList.add('open');
+        iosModal.setAttribute('aria-hidden', 'false');
+    };
+
+    const closeInstallModal = () => {
+        if (!iosModal) {
+            return;
+        }
+        iosModal.classList.remove('open');
+        iosModal.setAttribute('aria-hidden', 'true');
+    };
+    window.closeInstallModal = closeInstallModal;
+
+    installBtn.addEventListener('click', async () => {
+        if (isStandaloneMode()) {
+            installBtn.hidden = true;
+            return;
+        }
+
+        if (deferredInstallPrompt) {
+            deferredInstallPrompt.prompt();
+            const choice = await deferredInstallPrompt.userChoice.catch(() => null);
+            if (choice?.outcome !== 'accepted') {
+                showDashboardToast('Installazione annullata.', 'warn');
+            }
+            deferredInstallPrompt = null;
+            refreshInstallButton();
+            return;
+        }
+
+        if (isIosDevice()) {
+            openInstallModal();
+            return;
+        }
+
+        showDashboardToast('Installazione non disponibile in questo browser.', 'warn');
+    });
+
+    if (closeModalBtn && iosModal) {
+        closeModalBtn.addEventListener('click', closeInstallModal);
+        closeModalBtn.addEventListener('touchend', event => {
+            event.preventDefault();
+            closeInstallModal();
+        }, { passive: false });
+        iosModal.addEventListener('click', event => {
+            if (event.target === iosModal) {
+                closeInstallModal();
+            }
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape') {
+                closeInstallModal();
+            }
+        });
+        document.addEventListener('click', event => {
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) {
+                return;
+            }
+            if (target.closest('[data-close-install]')) {
+                closeInstallModal();
+            }
+        });
+    }
+
+    refreshInstallButton();
+}
+
 function toggleDashboardShowMore() {
     dashboardShowAllHidden = !dashboardShowAllHidden;
     renderDashboardEvents();
@@ -1838,4 +1965,6 @@ Promise.all([loadNewsDb(), loadPaymentsDb()]).then(() => {
 initDashboardAuth();
 setupAuthPopover();
 ensureDashboardEventAutoRefresh();
+registerServiceWorker();
+setupInstallApp();
 

@@ -3,8 +3,14 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MatchMap">
 <title>MatchMap - Gestione Designazioni</title>
 <link rel="icon" type="image/png" href="img/logo.png">
+<link rel="apple-touch-icon" href="img/logo.png">
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 </head>
@@ -20,6 +26,8 @@
             <p>Gestione designazioni, rimborsi e calendario in un unico spazio.</p>
             </div>
         </div>
+        <div class="header-actions">
+        <button id="installAppBtn" class="install-app-btn" type="button" hidden>Installa App</button>
         <div class="auth-anchor">
             <button id="authToggleBtn" class="auth-icon-btn" type="button" aria-label="Account">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -43,6 +51,7 @@
                 </div>
                 <p id="dashboardAuthStatus" class="auth-status">Modalita ospite attiva.</p>
             </div>
+        </div>
         </div>
     </div>
 </header>
@@ -169,6 +178,14 @@
         </div>
     </section>
 </main>
+
+<div id="iosInstallModal" class="install-modal" aria-hidden="true">
+    <div class="install-modal-card">
+        <h3>Installa MatchMap</h3>
+        <p>Su iPhone/iPad apri il menu Condividi di Safari e scegli Aggiungi alla schermata Home.</p>
+        <button id="closeInstallModalBtn" class="primary-btn install-modal-close" type="button" data-close-install onclick="document.getElementById('iosInstallModal')?.classList.remove('open');document.getElementById('iosInstallModal')?.setAttribute('aria-hidden','true');">Ho capito</button>
+    </div>
+</div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
