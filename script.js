@@ -1013,7 +1013,32 @@ function registerServiceWorker() {
         return;
     }
     window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+        navigator.serviceWorker.register('./service-worker.js').then(registration => {
+            registration.update().catch(() => {});
+            setInterval(() => {
+                registration.update().catch(() => {});
+            }, 60000);
+
+            registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                if (!newWorker) {
+                    return;
+                }
+                newWorker.addEventListener('statechange', () => {
+                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                        newWorker.postMessage('SKIP_WAITING');
+                    }
+                });
+            });
+        }).catch(() => {});
+
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (window.__matchmapSwRefreshing) {
+                return;
+            }
+            window.__matchmapSwRefreshing = true;
+            window.location.reload();
+        });
     });
 }
 

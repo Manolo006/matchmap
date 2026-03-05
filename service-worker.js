@@ -1,5 +1,5 @@
-const CACHE_VERSION = 'matchmap-v2';
-const STATIC_ASSETS = [
+const CACHE_NAME = 'matchmap-runtime';
+const CORE_ASSETS = [
   './',
   './index.html',
   './style.css',
@@ -7,24 +7,24 @@ const STATIC_ASSETS = [
   './firebase-config.js',
   './account-center.html',
   './account-center.css',
-  './img/logo.png',
-  './manifest.webmanifest'
+  './manifest.webmanifest',
+  './img/logo.png'
 ];
 
 self.addEventListener('install', event => {
   event.waitUntil(
-    caches.open(CACHE_VERSION).then(cache => cache.addAll(STATIC_ASSETS))
+    caches.open(CACHE_NAME).then(cache => cache.addAll(CORE_ASSETS))
   );
-  self.skipWaiting();
 });
 
 self.addEventListener('activate', event => {
-  event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(key => key !== CACHE_VERSION).map(key => caches.delete(key)))
-    )
-  );
-  self.clients.claim();
+  event.waitUntil(self.clients.claim());
+});
+
+self.addEventListener('message', event => {
+  if (event.data === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
 });
 
 self.addEventListener('fetch', event => {
@@ -34,37 +34,29 @@ self.addEventListener('fetch', event => {
   }
 
   const url = new URL(request.url);
-  const isSameOrigin = url.origin === self.location.origin;
-  if (!isSameOrigin) {
-    return;
-  }
-
-  const isHtmlRequest = request.headers.get('accept')?.includes('text/html');
-  if (isHtmlRequest) {
-    event.respondWith(
-      fetch(request)
-        .then(response => {
-          const clone = response.clone();
-          caches.open(CACHE_VERSION).then(cache => cache.put(request, clone));
-          return response;
-        })
-        .catch(() => caches.match(request).then(r => r || caches.match('./index.html')))
-    );
+  if (url.origin !== self.location.origin) {
     return;
   }
 
   event.respondWith(
-    caches.match(request).then(cached => {
-      if (cached) {
-        return cached;
-      }
-      return fetch(request)
-        .then(response => {
-          const clone = response.clone();
-          caches.open(CACHE_VERSION).then(cache => cache.put(request, clone));
-          return response;
-        })
-        .catch(() => cached);
-    })
+    fetch(request)
+      .then(response => {
+        if (response && response.status === 200 && response.type === 'basic') {
+          const cloned = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(request, cloned));
+        }
+        return response;
+      })
+      .catch(async () => {
+        const cached = await caches.match(request);
+        if (cached) {
+          return cached;
+        }
+        const acceptsHtml = request.headers.get('accept')?.includes('text/html');
+        if (acceptsHtml) {
+          return caches.match('./index.html');
+        }
+        throw new Error('Offline and no cached response');
+      })
   );
 });
