@@ -23,6 +23,7 @@ const TEAM_LOGO_FALLBACK_PATH = 'img/logo.png';
 const teamLogoUrlCache = new Map();
 const DASHBOARD_ADMIN_EMAILS = new Set(['manuelcarpita@gmail.com']);
 const AUTO_FIELD_SUGGESTIONS_CACHE_KEY = 'matchmap_auto_field_suggestions_v1';
+const DASHBOARD_AUTH_SNAPSHOT_KEY = 'matchmap_dashboard_auth_snapshot_v1';
 
 async function loadLuoghiDb() {
     try {
@@ -828,6 +829,67 @@ function setDashboardAuthStatus(text, isOk = false) {
     }
     statusEl.textContent = text;
     statusEl.style.color = isOk ? '#6ee7b7' : '#9fb2dd';
+}
+
+function readDashboardAuthSnapshot() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(DASHBOARD_AUTH_SNAPSHOT_KEY) || 'null');
+        if (!raw || typeof raw !== 'object') {
+            return null;
+        }
+        const savedAt = Number(raw.savedAt || 0);
+        const maxAgeMs = 7 * 24 * 60 * 60 * 1000;
+        if (!Number.isFinite(savedAt) || savedAt <= 0 || Date.now() - savedAt > maxAgeMs) {
+            return null;
+        }
+        return {
+            isLogged: Boolean(raw.isLogged),
+            nickname: String(raw.nickname || '').trim(),
+            avatarUrl: String(raw.avatarUrl || '').trim(),
+            isAdmin: Boolean(raw.isAdmin),
+            savedAt
+        };
+    } catch {
+        return null;
+    }
+}
+
+function writeDashboardAuthSnapshot(payload) {
+    try {
+        localStorage.setItem(DASHBOARD_AUTH_SNAPSHOT_KEY, JSON.stringify({
+            isLogged: Boolean(payload?.isLogged),
+            nickname: String(payload?.nickname || '').trim(),
+            avatarUrl: String(payload?.avatarUrl || '').trim(),
+            isAdmin: Boolean(payload?.isAdmin),
+            savedAt: Date.now()
+        }));
+    } catch {
+        // ignora errori localStorage
+    }
+}
+
+function clearDashboardAuthSnapshot() {
+    try {
+        localStorage.removeItem(DASHBOARD_AUTH_SNAPSHOT_KEY);
+    } catch {
+        // ignora errori localStorage
+    }
+}
+
+function applyDashboardAuthSnapshot(snapshot) {
+    if (!snapshot || !snapshot.isLogged) {
+        return false;
+    }
+    const pseudoUser = { displayName: snapshot.nickname || 'Utente', email: '' };
+    setDashboardAuthButtonsVisibility({ uid: '__snapshot__' });
+    setDashboardAuthAvatar(snapshot.avatarUrl || '');
+    setDashboardProfileSummary(pseudoUser, {
+        nickname: snapshot.nickname || 'Utente',
+        avatarUrl: snapshot.avatarUrl || ''
+    });
+    setDashboardAuthStatus(`Connesso come ${snapshot.nickname || 'Utente'}`, true);
+    setPublisherAdminLinkVisible(Boolean(snapshot.isAdmin));
+    return true;
 }
 
 function isDashboardAdmin(user) {
@@ -1890,6 +1952,7 @@ async function logoutDashboardUser() {
     }
     try {
         await fb.auth.signOut();
+        clearDashboardAuthSnapshot();
         setDashboardAuthStatus('Logout effettuato. Modalita ospite attiva.');
         await loadDashboardEvents();
     } catch (error) {
@@ -1900,11 +1963,16 @@ async function logoutDashboardUser() {
 function initDashboardAuth() {
     const fb = window.matchMapFirebase;
     setPublisherAdminLinkVisible(false);
-    setDashboardAuthButtonsVisibility(null);
-    setDashboardAuthAvatar('');
-    setDashboardProfileSummary(null, {});
+    const bootstrapSnapshot = readDashboardAuthSnapshot();
+    const hasAppliedSnapshot = applyDashboardAuthSnapshot(bootstrapSnapshot);
+    if (!hasAppliedSnapshot) {
+        setDashboardAuthStatus('Verifica sessione in corso...');
+    }
     if (!fb?.ready || !fb.auth) {
         setDashboardAuthStatus('Modalita ospite attiva (Firebase non disponibile).');
+        setDashboardAuthButtonsVisibility(null);
+        setDashboardAuthAvatar('');
+        setDashboardProfileSummary(null, {});
         loadDashboardEvents();
         return;
     }
@@ -1912,12 +1980,29 @@ function initDashboardAuth() {
     fb.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
     fb.auth.onAuthStateChanged(async user => {
         setDashboardAuthButtonsVisibility(user);
-        const profile = await syncDashboardAuthProfile(user);
-        await loadPreferredNewsRegionForUser(user, profile?.preferredRegion);
         if (!user) {
+            clearDashboardAuthSnapshot();
             setDashboardAuthStatus('Modalita ospite attiva.');
             setPublisherAdminLinkVisible(false);
-        } else if (isDashboardAdmin(user)) {
+            setDashboardAuthAvatar('');
+            setDashboardProfileSummary(null, {});
+            await loadPreferredNewsRegionForUser(null, null);
+            await loadDashboardEvents();
+            return;
+        }
+
+        // Evita effetto "logout/login" percepito durante il ripristino sessione.
+        setDashboardAuthStatus('Connessione account...', true);
+        const profile = await syncDashboardAuthProfile(user);
+        await loadPreferredNewsRegionForUser(user, profile?.preferredRegion);
+        writeDashboardAuthSnapshot({
+            isLogged: true,
+            nickname: String(profile?.nickname || user.displayName || user.email || '').trim(),
+            avatarUrl: String(profile?.avatarUrl || user.photoURL || '').trim(),
+            isAdmin: isDashboardAdmin(user)
+        });
+
+        if (isDashboardAdmin(user)) {
             const label = String(profile?.nickname || user.displayName || user.email || '').trim();
             setDashboardAuthStatus(`Connesso come ${label}`, true);
             setPublisherAdminLinkVisible(true);
