@@ -1190,49 +1190,6 @@ function registerServiceWorker() {
     });
 }
 
-function setupAppVersionAutoRefresh() {
-    let lastSignature = '';
-    let checking = false;
-
-    const checkVersion = async () => {
-        if (checking || document.visibilityState === 'hidden') {
-            return;
-        }
-        checking = true;
-        try {
-            const url = `./index.html?version_check=${Date.now()}`;
-            const res = await fetch(url, { cache: 'no-store' });
-            const etag = String(res.headers.get('etag') || '').trim();
-            const modified = String(res.headers.get('last-modified') || '').trim();
-            const signature = `${etag}|${modified}`;
-
-            if (!lastSignature) {
-                lastSignature = signature;
-            } else if (signature && signature !== lastSignature) {
-                window.location.reload();
-            }
-        } catch {
-            // nessuna rete: ignora
-        } finally {
-            checking = false;
-        }
-    };
-
-    window.addEventListener('load', () => {
-        checkVersion();
-        setInterval(checkVersion, 45000);
-    });
-
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-            checkVersion();
-        }
-    });
-
-    window.addEventListener('focus', () => {
-        checkVersion();
-    });
-}
 
 function setupInstallApp() {
     const installBtn = document.getElementById('installAppBtn');
@@ -2260,7 +2217,6 @@ initDashboardAuth();
 setupAuthPopover();
 ensureDashboardEventAutoRefresh();
 registerServiceWorker();
-setupAppVersionAutoRefresh();
 setupInstallApp();
 
 const authAvatarImg = document.getElementById('authAvatarImg');
