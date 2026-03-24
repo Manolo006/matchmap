@@ -674,6 +674,49 @@ function buildAutoFieldSuggestionKey(evento) {
     return normalizeText(keyParts.join('|'));
 }
 
+function buildAutoFieldUpdateSuggestionKey(evento, luogo) {
+    const keyParts = [
+        'update',
+        luogo?.nome || '',
+        luogo?.mapsUrl || '',
+        evento?.indirizzo || '',
+        evento?.locationText || ''
+    ];
+    return normalizeText(keyParts.join('|'));
+}
+
+function getLuogoAliases(entry) {
+    const raw = entry?.aliases;
+    if (Array.isArray(raw)) {
+        return raw.map(x => String(x || '').trim()).filter(Boolean);
+    }
+    if (typeof raw === 'string') {
+        return raw.split(/[\n;,]+/).map(x => x.trim()).filter(Boolean);
+    }
+    return [];
+}
+
+function luogoContainsAddressHint(entry, rawAddress) {
+    const target = normalizeText(rawAddress);
+    if (!target) {
+        return true;
+    }
+    const candidates = [
+        entry?.indirizzo,
+        entry?.mapsUrl,
+        ...getLuogoAliases(entry)
+    ]
+        .map(normalizeText)
+        .filter(Boolean);
+
+    return candidates.some(value => {
+        if (!value) {
+            return false;
+        }
+        return value === target || value.includes(target) || target.includes(value);
+    });
+}
+
 function getPrimaryTeamName(squadreText) {
     const teams = String(squadreText || '')
         .split(/\s*-\s*/)
@@ -722,9 +765,81 @@ async function autoSuggestFieldFromDesignazione(evento) {
         return;
     }
 
-    // Se il luogo e gia riconosciuto nel DB campi non serve segnalazione.
+    // Se il luogo e gia riconosciuto nel DB campi prova a proporre un aggiornamento indirizzo.
     const existingMatch = findLuogoDbMatch(evento.locationText);
     if (existingMatch) {
+        const candidateAddress = String(evento?.indirizzo || '').trim();
+        if (!candidateAddress || luogoContainsAddressHint(existingMatch, candidateAddress)) {
+            return;
+        }
+
+        const updateSuggestionKey = buildAutoFieldUpdateSuggestionKey(evento, existingMatch);
+        if (!updateSuggestionKey) {
+            return;
+        }
+
+        const cache = readAutoSuggestionsCache();
+        if (cache.has(updateSuggestionKey)) {
+            return;
+        }
+
+        const alreadyPending = await hasPendingSuggestionWithSameKey(fb.db, updateSuggestionKey);
+        if (alreadyPending) {
+            cache.add(updateSuggestionKey);
+            writeAutoSuggestionsCache(cache);
+            return;
+        }
+
+        const mapsCandidateUrl = existingMatch.mapsUrl || getMapsUrl(evento);
+        const coords = extractCoordinatesFromMapsUrl(mapsCandidateUrl);
+        const hasCoords = Boolean(coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lng));
+        const teamName = getPrimaryTeamName(evento.squadre);
+        const user = getCurrentDashboardUser();
+        if (!user) {
+            return;
+        }
+
+        const payload = {
+            type: 'campo_update',
+            team: teamName,
+            title: `Aggiornamento campo da designazione: ${existingMatch.nome || teamName}`,
+            text: `Proposta automatica: aggiungere un nuovo indirizzo utile per il campo esistente. Indirizzo estratto: ${candidateAddress}. Gara n.${evento.garaNumero || 'N/D'} del ${evento.data || 'N/D'} ore ${evento.ora || 'N/D'}.`,
+            mapsUrl: mapsCandidateUrl,
+            proofUrl: `https://www.google.com/search?q=${encodeURIComponent(`${existingMatch.nome || teamName} ${candidateAddress}`)}`,
+            status: 'pending',
+            source: 'auto_designazione_update',
+            sourceKey: updateSuggestionKey,
+            target: {
+                nome: existingMatch.nome || '',
+                indirizzo: existingMatch.indirizzo || '',
+                mapsUrl: existingMatch.mapsUrl || ''
+            },
+            extracted: {
+                garaNumero: evento.garaNumero || '',
+                categoria: evento.categoria || '',
+                squadre: evento.squadre || '',
+                luogo: evento.luogo || '',
+                impianto: evento.impianto || '',
+                indirizzo: candidateAddress,
+                locationText: evento.locationText || ''
+            },
+            checks: {
+                hasProofUrl: true,
+                hasMapsCoords: hasCoords
+            },
+            coordinates: hasCoords ? coords : null,
+            createdAt: Date.now(),
+            createdByUid: user?.uid || null,
+            createdByEmail: user?.email || null
+        };
+
+        try {
+            await fb.db.ref('suggestions').push(payload);
+            cache.add(updateSuggestionKey);
+            writeAutoSuggestionsCache(cache);
+        } catch {
+            // silenzioso
+        }
         return;
     }
 
@@ -772,7 +887,8 @@ async function autoSuggestFieldFromDesignazione(evento) {
             squadre: evento.squadre || '',
             luogo: evento.luogo || '',
             impianto: evento.impianto || '',
-            indirizzo: evento.indirizzo || ''
+            indirizzo: evento.indirizzo || '',
+            locationText: evento.locationText || ''
         },
         checks: {
             hasProofUrl: true,
@@ -2318,4 +2434,5 @@ if (authProfileSummaryImg) {
         authProfileSummaryImg.removeAttribute('src');
     });
 }
+
 

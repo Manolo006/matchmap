@@ -331,6 +331,13 @@ function normalizeLuogo(item) {
     const lngRaw = pickFirst(raw, ['lng', 'lon', 'longitude', 'Longitude']);
     const lat = Number(latRaw);
     const lng = Number(lngRaw);
+    const rawAliases = pickFirst(raw, ['aliases', 'Aliases', 'alias']);
+    const aliases = Array.isArray(rawAliases)
+        ? rawAliases.map(x => String(x || '').trim()).filter(Boolean)
+        : String(rawAliases || '')
+            .split(/[\n;,]+/)
+            .map(x => x.trim())
+            .filter(Boolean);
     return {
         nome: String(pickFirst(raw, ['nome', 'Nome', 'name', 'Name'])).trim(),
         indirizzo: String(pickFirst(raw, ['indirizzo', 'Indirizzo', 'address', 'Address'])).trim(),
@@ -338,6 +345,7 @@ function normalizeLuogo(item) {
         logoUrl: String(pickFirst(raw, ['logoUrl', 'LogoUrl', 'logoURL', 'logo', 'Logo'])).trim(),
         lat: Number.isFinite(lat) ? lat : null,
         lng: Number.isFinite(lng) ? lng : null,
+        aliases,
         fatto: true
     };
 }
@@ -402,10 +410,82 @@ function normalizeSuggestion(item, key) {
         status: String(raw.status || 'pending').trim(),
         checks: raw.checks || {},
         coordinates: raw.coordinates || null,
+        target: raw.target || {},
+        extracted: raw.extracted || {},
         createdAt: Number(raw.createdAt || 0),
         createdByEmail: String(raw.createdByEmail || '').trim(),
         createdByUid: String(raw.createdByUid || '').trim()
     };
+}
+
+function getSuggestionAddressCandidate(suggestion) {
+    return String(suggestion?.extracted?.indirizzo || '').trim();
+}
+
+function findLuogoIndexForUpdateSuggestion(suggestion) {
+    const targetMaps = normalizeText(suggestion?.target?.mapsUrl || suggestion?.mapsUrl);
+    const targetName = normalizeText(suggestion?.target?.nome || suggestion?.team || suggestion?.title);
+    return luoghiItems.findIndex(item => {
+        const sameMaps = targetMaps && normalizeText(item?.mapsUrl) === targetMaps;
+        if (sameMaps) {
+            return true;
+        }
+        const itemName = normalizeText(item?.nome);
+        return Boolean(targetName && itemName && (itemName.includes(targetName) || targetName.includes(itemName)));
+    });
+}
+
+function mergeLuogoAddressHint(luogo, newAddress) {
+    const address = String(newAddress || '').trim();
+    if (!address) {
+        return luogo;
+    }
+
+    const currentAddress = String(luogo?.indirizzo || '').trim();
+    const normalizedCurrent = normalizeText(currentAddress);
+    const normalizedNew = normalizeText(address);
+    const aliases = Array.isArray(luogo?.aliases)
+        ? luogo.aliases.map(x => String(x || '').trim()).filter(Boolean)
+        : [];
+
+    if (!currentAddress) {
+        luogo.indirizzo = address;
+        return luogo;
+    }
+
+    if (!normalizedCurrent || normalizedCurrent === normalizedNew || normalizedCurrent.includes(normalizedNew) || normalizedNew.includes(normalizedCurrent)) {
+        return luogo;
+    }
+
+    const alreadyInAliases = aliases.some(alias => {
+        const normalizedAlias = normalizeText(alias);
+        return normalizedAlias === normalizedNew || normalizedAlias.includes(normalizedNew) || normalizedNew.includes(normalizedAlias);
+    });
+    if (!alreadyInAliases) {
+        aliases.push(address);
+    }
+    luogo.aliases = aliases;
+    return luogo;
+}
+
+function buildLuogoFromFieldSuggestion(suggestion) {
+    const extracted = suggestion?.extracted || {};
+    const nome = String(
+        extracted.impianto
+        || extracted.luogo
+        || suggestion?.team
+        || suggestion?.title
+        || ''
+    ).trim();
+    const indirizzo = String(extracted.indirizzo || '').trim();
+
+    return normalizeLuogo({
+        nome,
+        indirizzo,
+        mapsUrl: suggestion?.mapsUrl || '',
+        lat: suggestion?.coordinates?.lat ?? null,
+        lng: suggestion?.coordinates?.lng ?? null
+    });
 }
 
 function saveNewsDraft() {
@@ -684,9 +764,12 @@ function renderSuggestionsList() {
         const scoreLabel = score === 2 ? 'Alta' : score === 1 ? 'Media' : 'Bassa';
         const mapsLink = item.mapsUrl ? `<a class="item-action-link" href="${item.mapsUrl}" target="_blank" rel="noopener noreferrer">Maps</a>` : '';
         const proofLink = item.proofUrl ? `<a class="item-action-link" href="${item.proofUrl}" target="_blank" rel="noopener noreferrer">Fonte</a>` : '';
+        const isUpdateSuggestion = item.type === 'campo_update';
+        const approveLabel = isUpdateSuggestion ? 'Implementa' : 'Approva';
+        const rejectLabel = isUpdateSuggestion ? 'Scarta' : 'Rifiuta';
         const actions = canReview
-            ? `<button type="button" data-action="approve-suggestion" data-id="${item.id}">Approva</button>
-               <button type="button" data-action="reject-suggestion" data-id="${item.id}">Rifiuta</button>`
+            ? `<button type="button" data-action="approve-suggestion" data-id="${item.id}">${approveLabel}</button>
+               <button type="button" data-action="reject-suggestion" data-id="${item.id}">${rejectLabel}</button>`
             : `<span class="muted">Gia revisionata (${item.status})</span>`;
 
         const card = document.createElement('article');
@@ -1489,7 +1572,31 @@ async function approveSuggestionById(suggestionId) {
     }
 
     try {
-        if (suggestion.type === 'campo') {
+        if (suggestion.type === 'campo_update') {
+            const luogoIndex = findLuogoIndexForUpdateSuggestion(suggestion);
+            if (luogoIndex < 0) {
+                setSuggestionsStatus('Campo da aggiornare non trovato in archivio.', 'err');
+                return;
+            }
+
+            const candidateAddress = getSuggestionAddressCandidate(suggestion);
+            if (!candidateAddress) {
+                setSuggestionsStatus('Segnalazione senza indirizzo utile da implementare.', 'err');
+                return;
+            }
+
+            const updated = mergeLuogoAddressHint({ ...luoghiItems[luogoIndex] }, candidateAddress);
+            luoghiItems[luogoIndex] = normalizeLuogo(updated);
+            saveLuoghiDraft();
+            await fb.db.ref('luoghi').set(luoghiItems.map(normalizeLuogo));
+            await fb.db.ref(`suggestions/${suggestion.id}`).update({
+                status: 'implemented',
+                reviewedAt: Date.now(),
+                reviewedBy: fb.auth.currentUser.email || fb.auth.currentUser.uid,
+                target: 'luoghi_update'
+            });
+            setSuggestionsStatus('Aggiornamento implementato sul campo esistente.', 'ok');
+        } else if (suggestion.type === 'campo') {
             if (isDuplicateLuogoSuggestion(suggestion)) {
                 await fb.db.ref(`suggestions/${suggestion.id}`).update({
                     status: 'duplicate',
@@ -1498,13 +1605,7 @@ async function approveSuggestionById(suggestionId) {
                 });
                 setSuggestionsStatus('Campo gia presente: segnalazione marcata come duplicata.', 'err');
             } else {
-                luoghiItems.push(normalizeLuogo({
-                    nome: suggestion.team || suggestion.title,
-                    indirizzo: '',
-                    mapsUrl: suggestion.mapsUrl,
-                    lat: suggestion.coordinates?.lat ?? null,
-                    lng: suggestion.coordinates?.lng ?? null
-                }));
+                luoghiItems.push(buildLuogoFromFieldSuggestion(suggestion));
                 saveLuoghiDraft();
                 await fb.db.ref('luoghi').set(luoghiItems.map(normalizeLuogo));
                 await fb.db.ref(`suggestions/${suggestion.id}`).update({
