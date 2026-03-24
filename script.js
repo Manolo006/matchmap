@@ -626,10 +626,15 @@ function parseDesignazione(testo) {
     const arbitroRegex = /^([A-Z\s'`]+),\s*sei designato/i;
     const rimborsoRegex = /Rimborso:\s*(\d+)\s*[€\u20AC]/i;
     const kmRegex = /\((\d+)\s*Km\)/i;
+    const designazioneS4yRegex = /a\s+(.+?)\s+sull['’]impianto\s+(.+?)\s+sito in\s+([^\r\n]+)/i;
 
     const luogo = testo.match(luogoRegex)?.[1]?.trim() || '';
     const impianto = testo.match(impiantoRegex)?.[1]?.trim() || '';
     const indirizzo = testo.match(indirizzoRegex)?.[1]?.trim() || '';
+    const designazioneS4yMatch = testo.match(designazioneS4yRegex);
+    const designazioneS4yRaw = designazioneS4yMatch
+        ? `a ${designazioneS4yMatch[1].trim()} sull'impianto ${designazioneS4yMatch[2].trim()} sito in ${designazioneS4yMatch[3].trim()}`
+        : '';
     const locationText = [luogo, impianto, indirizzo].filter(Boolean).join(', ');
 
     return {
@@ -638,6 +643,7 @@ function parseDesignazione(testo) {
         luogo,
         impianto,
         indirizzo,
+        designazioneS4yRaw,
         locationText,
         squadre: testo.match(squadreRegex)?.[1]?.trim() || '',
         categoria: testo.match(categoriaRegex)?.[1]?.trim() || '',
@@ -685,6 +691,22 @@ function buildAutoFieldUpdateSuggestionKey(evento, luogo) {
     return normalizeText(keyParts.join('|'));
 }
 
+function buildDesignazioneS4y(evento) {
+    const explicit = String(evento?.designazioneS4yRaw || '').trim();
+    if (explicit) {
+        return explicit;
+    }
+    const base = [
+        String(evento?.luogo || '').trim(),
+        String(evento?.impianto || '').trim(),
+        String(evento?.indirizzo || '').trim()
+    ];
+    if (!base.some(Boolean)) {
+        return '';
+    }
+    return `a ${base[0]} sull'impianto ${base[1]} sito in ${base[2]}`.replace(/\s+/g, ' ').trim();
+}
+
 function getLuogoAliases(entry) {
     const raw = entry?.aliases;
     if (Array.isArray(raw)) {
@@ -694,6 +716,25 @@ function getLuogoAliases(entry) {
         return raw.split(/[\n;,]+/).map(x => x.trim()).filter(Boolean);
     }
     return [];
+}
+
+function getLuogoDesignazioneKeys(entry) {
+    const raw = entry?.designazioneS4y;
+    if (Array.isArray(raw)) {
+        return raw.map(x => normalizeText(x)).filter(Boolean);
+    }
+    if (typeof raw === 'string') {
+        return raw.split(/[\n;,]+/).map(x => normalizeText(x)).filter(Boolean);
+    }
+    return [];
+}
+
+function luogoHasDesignazioneKey(entry, rawKey) {
+    const key = normalizeText(rawKey);
+    if (!key) {
+        return false;
+    }
+    return getLuogoDesignazioneKeys(entry).includes(key);
 }
 
 function luogoContainsAddressHint(entry, rawAddress) {
@@ -715,6 +756,95 @@ function luogoContainsAddressHint(entry, rawAddress) {
         }
         return value === target || value.includes(target) || target.includes(value);
     });
+}
+
+function findExistingLuogoForEvento(evento) {
+    const strictMatch = findLuogoDbMatch(evento?.locationText || '');
+    if (strictMatch) {
+        return strictMatch;
+    }
+
+    const designazioneKey = normalizeText(buildDesignazioneS4y(evento));
+    const impiantoNorm = normalizeText(evento?.impianto || '');
+    const luogoNorm = normalizeText(evento?.luogo || '');
+    const indirizzoNorm = normalizeText(evento?.indirizzo || '');
+    const eventTokens = new Set(
+        [impiantoNorm, luogoNorm, indirizzoNorm]
+            .join(' ')
+            .split(' ')
+            .filter(token => token.length >= 3)
+    );
+
+    let best = null;
+    let bestScore = 0;
+    luoghiDb.forEach(entry => {
+        const nome = normalizeText(entry?.nome);
+        const indirizzo = normalizeText(entry?.indirizzo);
+        const comune = normalizeText(entry?.comune);
+        const aliases = getLuogoAliases(entry).map(normalizeText).filter(Boolean);
+        const designKeys = getLuogoDesignazioneKeys(entry);
+        const fields = [nome, indirizzo, comune, ...aliases].filter(Boolean);
+        if (!fields.length) {
+            return;
+        }
+
+        const haystack = fields.join(' ');
+        let score = 0;
+
+        if (designazioneKey) {
+            if (designKeys.includes(designazioneKey)) {
+                score += 420;
+            } else if (designKeys.some(value => value && (value.includes(designazioneKey) || designazioneKey.includes(value)))) {
+                score += 220;
+            }
+        }
+
+        if (impiantoNorm) {
+            if (haystack.includes(impiantoNorm)) {
+                score += 180;
+            } else {
+                fields.forEach(value => {
+                    if (value.length >= 5 && (value.includes(impiantoNorm) || impiantoNorm.includes(value))) {
+                        score += 90;
+                    }
+                });
+            }
+        }
+
+        if (luogoNorm) {
+            if (haystack.includes(luogoNorm)) {
+                score += 120;
+            } else {
+                fields.forEach(value => {
+                    if (value.length >= 5 && (value.includes(luogoNorm) || luogoNorm.includes(value))) {
+                        score += 60;
+                    }
+                });
+            }
+        }
+
+        if (indirizzoNorm && haystack.includes(indirizzoNorm)) {
+            score += 70;
+        }
+
+        if (eventTokens.size) {
+            const candidateTokens = new Set(haystack.split(' ').filter(token => token.length >= 3));
+            let overlap = 0;
+            candidateTokens.forEach(token => {
+                if (eventTokens.has(token)) {
+                    overlap += 1;
+                }
+            });
+            score += overlap * 8;
+        }
+
+        if (score > bestScore) {
+            bestScore = score;
+            best = entry;
+        }
+    });
+
+    return bestScore >= 55 ? best : null;
 }
 
 function getPrimaryTeamName(squadreText) {
@@ -765,11 +895,20 @@ async function autoSuggestFieldFromDesignazione(evento) {
         return;
     }
 
+    // Se la cache locale e vuota prova a ricaricare i luoghi prima di classificare il campo.
+    if (!luoghiDb.length) {
+        await loadLuoghiDb();
+    }
+
+    const designazioneS4y = buildDesignazioneS4y(evento);
+
     // Se il luogo e gia riconosciuto nel DB campi prova a proporre un aggiornamento indirizzo.
-    const existingMatch = findLuogoDbMatch(evento.locationText);
+    const existingMatch = findExistingLuogoForEvento(evento);
     if (existingMatch) {
         const candidateAddress = String(evento?.indirizzo || '').trim();
-        if (!candidateAddress || luogoContainsAddressHint(existingMatch, candidateAddress)) {
+        const shouldUpdateAddress = Boolean(candidateAddress && !luogoContainsAddressHint(existingMatch, candidateAddress));
+        const shouldUpdateDesignazione = Boolean(designazioneS4y && !luogoHasDesignazioneKey(existingMatch, designazioneS4y));
+        if (!shouldUpdateAddress && !shouldUpdateDesignazione) {
             return;
         }
 
@@ -803,9 +942,9 @@ async function autoSuggestFieldFromDesignazione(evento) {
             type: 'campo_update',
             team: teamName,
             title: `Aggiornamento campo da designazione: ${existingMatch.nome || teamName}`,
-            text: `Proposta automatica: aggiungere un nuovo indirizzo utile per il campo esistente. Indirizzo estratto: ${candidateAddress}. Gara n.${evento.garaNumero || 'N/D'} del ${evento.data || 'N/D'} ore ${evento.ora || 'N/D'}.`,
+            text: `Proposta automatica per campo esistente.${shouldUpdateAddress ? ` Nuovo indirizzo estratto: ${candidateAddress}.` : ''}${shouldUpdateDesignazione ? ` Nuova designazione s4y: ${designazioneS4y}.` : ''} Gara n.${evento.garaNumero || 'N/D'} del ${evento.data || 'N/D'} ore ${evento.ora || 'N/D'}.`,
             mapsUrl: mapsCandidateUrl,
-            proofUrl: `https://www.google.com/search?q=${encodeURIComponent(`${existingMatch.nome || teamName} ${candidateAddress}`)}`,
+            proofUrl: `https://www.google.com/search?q=${encodeURIComponent(`${existingMatch.nome || teamName} ${candidateAddress || designazioneS4y || evento.locationText}`)}`,
             status: 'pending',
             source: 'auto_designazione_update',
             sourceKey: updateSuggestionKey,
@@ -821,6 +960,7 @@ async function autoSuggestFieldFromDesignazione(evento) {
                 luogo: evento.luogo || '',
                 impianto: evento.impianto || '',
                 indirizzo: candidateAddress,
+                designazioneS4y,
                 locationText: evento.locationText || ''
             },
             checks: {
@@ -888,6 +1028,7 @@ async function autoSuggestFieldFromDesignazione(evento) {
             luogo: evento.luogo || '',
             impianto: evento.impianto || '',
             indirizzo: evento.indirizzo || '',
+            designazioneS4y,
             locationText: evento.locationText || ''
         },
         checks: {
@@ -2434,5 +2575,8 @@ if (authProfileSummaryImg) {
         authProfileSummaryImg.removeAttribute('src');
     });
 }
+
+
+
 
 

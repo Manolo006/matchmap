@@ -63,6 +63,7 @@ const luogoIndirizzoInput = document.getElementById('luogoIndirizzoInput');
 const luogoMapsInput = document.getElementById('luogoMapsInput');
 const luogoLogoInput = document.getElementById('luogoLogoInput');
 const luogoCoordsInput = document.getElementById('luogoCoordsInput');
+const luogoDesignazioneKeyInput = document.getElementById('luogoDesignazioneKeyInput');
 const pasteCoordsBtn = document.getElementById('pasteCoordsBtn');
 const luogoAutofillLogosBtn = document.getElementById('luogoAutofillLogosBtn');
 const luogoSaveBtn = document.getElementById('luogoSaveBtn');
@@ -338,6 +339,23 @@ function normalizeLuogo(item) {
             .split(/[\n;,]+/)
             .map(x => x.trim())
             .filter(Boolean);
+    const rawDesignazione = pickFirst(raw, ['designazioneS4y', 'designazioneKey', 'designazioneKeys', 's4y']);
+    const designazioneRawList = Array.isArray(rawDesignazione)
+        ? rawDesignazione.map(x => String(x || '').trim()).filter(Boolean)
+        : String(rawDesignazione || '')
+            .split(/[\n;,]+/)
+            .map(x => x.trim())
+            .filter(Boolean);
+    const designazioneS4y = [];
+    const seenDesignazione = new Set();
+    designazioneRawList.forEach(value => {
+        const key = normalizeText(value);
+        if (!key || seenDesignazione.has(key)) {
+            return;
+        }
+        seenDesignazione.add(key);
+        designazioneS4y.push(value);
+    });
     return {
         nome: String(pickFirst(raw, ['nome', 'Nome', 'name', 'Name'])).trim(),
         indirizzo: String(pickFirst(raw, ['indirizzo', 'Indirizzo', 'address', 'Address'])).trim(),
@@ -346,6 +364,7 @@ function normalizeLuogo(item) {
         lat: Number.isFinite(lat) ? lat : null,
         lng: Number.isFinite(lng) ? lng : null,
         aliases,
+        designazioneS4y,
         fatto: true
     };
 }
@@ -468,6 +487,23 @@ function mergeLuogoAddressHint(luogo, newAddress) {
     return luogo;
 }
 
+function mergeLuogoDesignazioneKey(luogo, rawKey) {
+    const rawValue = String(rawKey || '').trim();
+    const key = normalizeText(rawValue);
+    if (!rawValue || !key) {
+        return luogo;
+    }
+    const existingRaw = Array.isArray(luogo?.designazioneS4y)
+        ? luogo.designazioneS4y.map(x => String(x || '').trim()).filter(Boolean)
+        : [];
+    const existingKeys = new Set(existingRaw.map(x => normalizeText(x)).filter(Boolean));
+    if (!existingKeys.has(key)) {
+        existingRaw.push(rawValue);
+    }
+    luogo.designazioneS4y = existingRaw;
+    return luogo;
+}
+
 function buildLuogoFromFieldSuggestion(suggestion) {
     const extracted = suggestion?.extracted || {};
     const nome = String(
@@ -484,7 +520,8 @@ function buildLuogoFromFieldSuggestion(suggestion) {
         indirizzo,
         mapsUrl: suggestion?.mapsUrl || '',
         lat: suggestion?.coordinates?.lat ?? null,
-        lng: suggestion?.coordinates?.lng ?? null
+        lng: suggestion?.coordinates?.lng ?? null,
+        designazioneS4y: extracted.designazioneS4y || ''
     });
 }
 
@@ -563,6 +600,9 @@ function resetLuogoForm() {
     luogoMapsInput.value = '';
     luogoLogoInput.value = '';
     luogoCoordsInput.value = '';
+    if (luogoDesignazioneKeyInput) {
+        luogoDesignazioneKeyInput.value = '';
+    }
     lastGeoResolveKey = '';
     editLuogoIndex = -1;
     luogoSaveBtn.textContent = 'Aggiungi Luogo';
@@ -590,6 +630,11 @@ function fillLuogoForm(index) {
     luogoIndirizzoInput.value = item.indirizzo;
     luogoMapsInput.value = item.mapsUrl;
     luogoLogoInput.value = item.logoUrl || '';
+    if (luogoDesignazioneKeyInput) {
+        luogoDesignazioneKeyInput.value = Array.isArray(item.designazioneS4y)
+            ? item.designazioneS4y.join('; ')
+            : '';
+    }
     const latNum = Number(item.lat);
     const lngNum = Number(item.lng);
     luogoCoordsInput.value = (Number.isFinite(latNum) && Number.isFinite(lngNum))
@@ -677,6 +722,7 @@ function renderLuoghiList() {
             <div class="meta">${item.indirizzo || '-'}</div>
             <p class="item-pre"><strong>Maps:</strong> ${item.mapsUrl || '-'}</p>
             <p class="item-pre"><strong>Logo squadra:</strong> ${item.logoUrl || '-'}</p>
+            <p class="item-pre"><strong>Designazione s4y:</strong> ${(Array.isArray(item.designazioneS4y) && item.designazioneS4y.length) ? item.designazioneS4y.join('; ') : '-'}</p>
             <p class="item-pre"><strong>Coordinate:</strong> ${item.lat ?? '-'}, ${item.lng ?? '-'}</p>
             <div class="item-actions">
                 <button type="button" data-action="edit-luogo" data-index="${index}">Modifica</button>
@@ -804,6 +850,20 @@ function validateLuogoForm() {
     const indirizzo = luogoIndirizzoInput.value.trim();
     const mapsUrl = luogoMapsInput.value.trim();
     const logoUrl = luogoLogoInput.value.trim();
+    const designazioneS4yRaw = String(luogoDesignazioneKeyInput?.value || '')
+        .split(/[\n;,]+/)
+        .map(x => String(x || '').trim())
+        .filter(Boolean);
+    const designazioneS4y = [];
+    const seenDesignazione = new Set();
+    designazioneS4yRaw.forEach(value => {
+        const key = normalizeText(value);
+        if (!key || seenDesignazione.has(key)) {
+            return;
+        }
+        seenDesignazione.add(key);
+        designazioneS4y.push(value);
+    });
     const coordsText = luogoCoordsInput.value.trim();
     let lat = null;
     let lng = null;
@@ -834,7 +894,7 @@ function validateLuogoForm() {
         lng = Number.isFinite(existingLng) ? existingLng : null;
     }
 
-    return { nome, indirizzo, mapsUrl, logoUrl, lat, lng };
+    return { nome, indirizzo, mapsUrl, logoUrl, designazioneS4y, lat, lng };
 }
 
 function addPaymentRow() {
@@ -1580,12 +1640,16 @@ async function approveSuggestionById(suggestionId) {
             }
 
             const candidateAddress = getSuggestionAddressCandidate(suggestion);
-            if (!candidateAddress) {
-                setSuggestionsStatus('Segnalazione senza indirizzo utile da implementare.', 'err');
+            const designazioneKey = String(suggestion?.extracted?.designazioneS4y || '').trim();
+            if (!candidateAddress && !designazioneKey) {
+                setSuggestionsStatus('Segnalazione senza indirizzo/designazione utili da implementare.', 'err');
                 return;
             }
 
-            const updated = mergeLuogoAddressHint({ ...luoghiItems[luogoIndex] }, candidateAddress);
+            const updated = mergeLuogoDesignazioneKey(
+                mergeLuogoAddressHint({ ...luoghiItems[luogoIndex] }, candidateAddress),
+                designazioneKey
+            );
             luoghiItems[luogoIndex] = normalizeLuogo(updated);
             saveLuoghiDraft();
             await fb.db.ref('luoghi').set(luoghiItems.map(normalizeLuogo));
