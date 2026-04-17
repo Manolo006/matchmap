@@ -24,6 +24,9 @@ const teamLogoUrlCache = new Map();
 const DASHBOARD_ADMIN_EMAILS = new Set(['manuelcarpita@gmail.com']);
 const AUTO_FIELD_SUGGESTIONS_CACHE_KEY = 'matchmap_auto_field_suggestions_v1';
 const DASHBOARD_AUTH_SNAPSHOT_KEY = 'matchmap_dashboard_auth_snapshot_v1';
+const GMAIL_INTEGRATION_STORAGE_KEY = 'matchmap_gmail_integration_v1';
+const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const GMAIL_DEFAULT_QUERY = 'from:(noreply OR no-reply OR designazioni) (sinfonia OR designazione OR aia) newer_than:180d';
 
 async function loadLuoghiDb() {
     try {
@@ -612,6 +615,615 @@ let dashboardEvents = [];
 let dashboardShowAllHidden = false;
 let dashboardEventAutoRefreshTimer = null;
 const SUGGESTION_COOLDOWN_KEY = 'matchmap_last_suggestion_ts_v1';
+let gmailTokenClient = null;
+let gmailAccessToken = '';
+let gmailTokenExpiresAt = 0;
+let gmailPreviewItems = [];
+let gmailSelectAllState = false;
+let gmailIntegrationPrefs = {
+    enabled: false,
+    query: GMAIL_DEFAULT_QUERY,
+    linkedEmail: '',
+    updatedAt: 0
+};
+
+function getGmailUiRefs() {
+    return {
+        queryInput: document.getElementById('gmailQueryInput'),
+        statusEl: document.getElementById('gmailStatus'),
+        connectBtn: document.getElementById('gmailConnectBtn'),
+        disconnectBtn: document.getElementById('gmailDisconnectBtn'),
+        loadBtn: document.getElementById('gmailLoadBtn'),
+        previewWrap: document.getElementById('gmailPreviewWrap'),
+        previewList: document.getElementById('gmailPreviewList'),
+        importBtn: document.getElementById('gmailImportSelectedBtn'),
+        selectAllBtn: document.getElementById('gmailSelectAllBtn')
+    };
+}
+
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function isGmailTokenValid() {
+    return Boolean(gmailAccessToken) && Date.now() < (gmailTokenExpiresAt - 5000);
+}
+
+function setGmailStatus(message, isOk = false) {
+    const { statusEl } = getGmailUiRefs();
+    if (!statusEl) {
+        return;
+    }
+    statusEl.textContent = message;
+    statusEl.style.color = isOk ? '#6ee7b7' : '#9fb2dd';
+}
+
+function readGmailIntegrationPrefs() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(GMAIL_INTEGRATION_STORAGE_KEY) || '{}');
+        return {
+            enabled: Boolean(raw?.enabled),
+            query: String(raw?.query || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY,
+            linkedEmail: String(raw?.linkedEmail || '').trim(),
+            updatedAt: Number(raw?.updatedAt || 0)
+        };
+    } catch {
+        return {
+            enabled: false,
+            query: GMAIL_DEFAULT_QUERY,
+            linkedEmail: '',
+            updatedAt: 0
+        };
+    }
+}
+
+function writeGmailIntegrationPrefsLocal() {
+    localStorage.setItem(GMAIL_INTEGRATION_STORAGE_KEY, JSON.stringify({
+        enabled: Boolean(gmailIntegrationPrefs?.enabled),
+        query: String(gmailIntegrationPrefs?.query || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY,
+        linkedEmail: String(gmailIntegrationPrefs?.linkedEmail || '').trim(),
+        updatedAt: Date.now()
+    }));
+}
+
+async function persistGmailIntegrationPrefs() {
+    writeGmailIntegrationPrefsLocal();
+    const user = getCurrentDashboardUser();
+    const { fb } = getDashboardAuthState();
+    if (!user || !fb?.ready || !fb.db) {
+        return;
+    }
+    try {
+        await fb.db.ref(`users/${user.uid}/integrations/gmail`).set({
+            enabled: Boolean(gmailIntegrationPrefs?.enabled),
+            query: String(gmailIntegrationPrefs?.query || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY,
+            linkedEmail: String(gmailIntegrationPrefs?.linkedEmail || '').trim(),
+            updatedAt: Date.now()
+        });
+    } catch {
+        // fallback gia salvato in locale
+    }
+}
+
+async function loadGmailIntegrationPrefsForCurrentUser() {
+    const local = readGmailIntegrationPrefs();
+    let merged = { ...local };
+    const user = getCurrentDashboardUser();
+    const { fb } = getDashboardAuthState();
+    if (user && fb?.ready && fb.db) {
+        try {
+            const snap = await fb.db.ref(`users/${user.uid}/integrations/gmail`).once('value');
+            if (snap.exists()) {
+                const cloud = snap.val() || {};
+                merged = {
+                    enabled: Boolean(cloud?.enabled),
+                    query: String(cloud?.query || local.query || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY,
+                    linkedEmail: String(cloud?.linkedEmail || local.linkedEmail || '').trim(),
+                    updatedAt: Number(cloud?.updatedAt || local.updatedAt || 0)
+                };
+            }
+        } catch {
+            merged = { ...local };
+        }
+    }
+
+    gmailIntegrationPrefs = {
+        enabled: Boolean(merged.enabled),
+        query: String(merged.query || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY,
+        linkedEmail: String(merged.linkedEmail || '').trim(),
+        updatedAt: Number(merged.updatedAt || 0)
+    };
+
+    const { queryInput } = getGmailUiRefs();
+    if (queryInput) {
+        queryInput.value = gmailIntegrationPrefs.query || GMAIL_DEFAULT_QUERY;
+    }
+    updateGmailUiState();
+}
+
+function decodeBase64Url(value) {
+    const input = String(value || '').trim();
+    if (!input) {
+        return '';
+    }
+    const base64 = input.replace(/-/g, '+').replace(/_/g, '/');
+    const padLen = (4 - (base64.length % 4)) % 4;
+    const padded = base64 + '='.repeat(padLen);
+    try {
+        return decodeURIComponent(escape(atob(padded)));
+    } catch {
+        try {
+            return atob(padded);
+        } catch {
+            return '';
+        }
+    }
+}
+
+function stripHtmlTags(value) {
+    return String(value || '')
+        .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function extractHeaderValue(headers, name) {
+    const target = String(name || '').trim().toLowerCase();
+    const list = Array.isArray(headers) ? headers : [];
+    const hit = list.find(item => String(item?.name || '').trim().toLowerCase() === target);
+    return String(hit?.value || '').trim();
+}
+
+function extractBodyFromGmailPayload(payload) {
+    if (!payload || typeof payload !== 'object') {
+        return '';
+    }
+
+    const directMime = String(payload.mimeType || '').toLowerCase();
+    const directData = decodeBase64Url(payload?.body?.data || '');
+    if (directMime === 'text/plain' && directData) {
+        return directData;
+    }
+    if (directMime === 'text/html' && directData) {
+        return stripHtmlTags(directData);
+    }
+
+    const queue = Array.isArray(payload.parts) ? [...payload.parts] : [];
+    let htmlFallback = '';
+    while (queue.length) {
+        const part = queue.shift();
+        if (!part || typeof part !== 'object') {
+            continue;
+        }
+        const mime = String(part.mimeType || '').toLowerCase();
+        const data = decodeBase64Url(part?.body?.data || '');
+        if (mime === 'text/plain' && data) {
+            return data;
+        }
+        if (mime === 'text/html' && data && !htmlFallback) {
+            htmlFallback = stripHtmlTags(data);
+        }
+        if (Array.isArray(part.parts) && part.parts.length) {
+            queue.push(...part.parts);
+        }
+    }
+
+    return htmlFallback || '';
+}
+
+function formatTimestampAsMatchMapDate(timestampValue) {
+    const ts = Number(timestampValue || 0);
+    if (!Number.isFinite(ts) || ts <= 0) {
+        return '';
+    }
+    const date = new Date(ts);
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = String(date.getFullYear());
+    return `${day}/${month}/${year}`;
+}
+
+function ensureEventoShape(evento, fallbackTimestamp = 0) {
+    const item = { ...(evento || {}) };
+    if (!item.data) {
+        item.data = formatTimestampAsMatchMapDate(fallbackTimestamp);
+    }
+    if (!item.ora) {
+        const fallback = String(item._gmailDate || '').match(/\b([01]\d|2[0-3]):([0-5]\d)\b/);
+        item.ora = fallback ? `${fallback[1]}:${fallback[2]}` : '';
+    }
+    item.rimborso = Number(item.rimborso || 0);
+    item.km = Number(item.km || 0);
+    item.locationText = String(item.locationText || [item.luogo, item.impianto, item.indirizzo].filter(Boolean).join(', ')).trim();
+    return item;
+}
+
+function buildPreviewEventoFromMessage(message) {
+    const payload = message?.payload || {};
+    const subject = extractHeaderValue(payload.headers, 'Subject');
+    const from = extractHeaderValue(payload.headers, 'From');
+    const dateHeader = extractHeaderValue(payload.headers, 'Date');
+    const body = extractBodyFromGmailPayload(payload);
+    const snippet = String(message?.snippet || '').trim();
+
+    const parsedFromBody = parseDesignazione(body || snippet);
+    const evento = ensureEventoShape({
+        ...parsedFromBody,
+        _gmailMessageId: String(message?.id || ''),
+        _gmailThreadId: String(message?.threadId || ''),
+        _gmailSubject: subject,
+        _gmailFrom: from,
+        _gmailDate: dateHeader,
+        _gmailSnippet: snippet
+    }, Number(message?.internalDate || 0));
+
+    const valid = Boolean(evento.data && evento.ora && evento.squadre);
+    return {
+        id: String(message?.id || ''),
+        selected: valid,
+        valid,
+        messageMeta: {
+            subject,
+            from,
+            date: dateHeader,
+            snippet
+        },
+        evento
+    };
+}
+
+function renderGmailPreviewList() {
+    const { previewWrap, previewList, importBtn, selectAllBtn } = getGmailUiRefs();
+    if (!previewWrap || !previewList || !importBtn || !selectAllBtn) {
+        return;
+    }
+
+    if (!gmailPreviewItems.length) {
+        previewWrap.hidden = true;
+        previewList.innerHTML = '';
+        importBtn.hidden = true;
+        selectAllBtn.hidden = true;
+        return;
+    }
+
+    previewWrap.hidden = false;
+    const validCount = gmailPreviewItems.filter(item => item.valid).length;
+    const selectedCount = gmailPreviewItems.filter(item => item.valid && item.selected).length;
+    gmailSelectAllState = Boolean(validCount && selectedCount === validCount);
+
+    previewList.innerHTML = gmailPreviewItems.map((item, index) => {
+        const evento = item.evento || {};
+        const meta = item.messageMeta || {};
+        const summary = [evento.data, evento.ora, evento.squadre].filter(Boolean).join(' - ');
+        const validityClass = item.valid ? 'is-valid' : 'is-invalid';
+        const validityLabel = item.valid ? 'Estrazione ok' : 'Non riconosciuta (controlla manualmente)';
+        const checked = item.selected ? 'checked' : '';
+        const disabled = item.valid ? '' : 'disabled';
+        return `
+            <article class="gmail-preview-item ${validityClass}">
+                <label class="gmail-preview-check">
+                    <input type="checkbox" data-gmail-preview-index="${index}" ${checked} ${disabled}>
+                    <span>${escapeHtml(validityLabel)}</span>
+                </label>
+                <p><strong>Email:</strong> ${escapeHtml(meta.subject || '(senza oggetto)')}</p>
+                <p><strong>Da:</strong> ${escapeHtml(meta.from || '-')}</p>
+                <p><strong>Data email:</strong> ${escapeHtml(meta.date || '-')}</p>
+                <p><strong>Partita:</strong> ${escapeHtml(summary || 'Dati insufficienti')}</p>
+                <p><strong>Categoria:</strong> ${escapeHtml(evento.categoria || '-')} | <strong>Rimborso:</strong> ${escapeHtml(String(evento.rimborso || 0))} €</p>
+            </article>
+        `;
+    }).join('');
+
+    importBtn.hidden = selectedCount <= 0;
+    selectAllBtn.hidden = validCount <= 0;
+    selectAllBtn.textContent = gmailSelectAllState ? 'Deseleziona tutti' : 'Seleziona tutti';
+}
+
+function clearGmailPreview() {
+    gmailPreviewItems = [];
+    gmailSelectAllState = false;
+    renderGmailPreviewList();
+}
+
+function updateGmailUiState() {
+    const { connectBtn, disconnectBtn, loadBtn, queryInput } = getGmailUiRefs();
+    if (!connectBtn || !disconnectBtn || !loadBtn || !queryInput) {
+        return;
+    }
+
+    const tokenReady = isGmailTokenValid();
+    connectBtn.hidden = tokenReady;
+    disconnectBtn.hidden = !gmailIntegrationPrefs.enabled;
+    loadBtn.hidden = !tokenReady;
+    queryInput.disabled = !gmailIntegrationPrefs.enabled;
+
+    if (!gmailIntegrationPrefs.enabled) {
+        setGmailStatus('Funzione disattivata. Usa il flusso principale copia/incolla.');
+    } else if (!tokenReady) {
+        const linked = gmailIntegrationPrefs.linkedEmail ? ` (${gmailIntegrationPrefs.linkedEmail})` : '';
+        setGmailStatus(`Gmail collegata${linked}. Premi "Collega Gmail" per autorizzare lettura in questa sessione.`);
+    } else {
+        const linked = gmailIntegrationPrefs.linkedEmail ? ` come ${gmailIntegrationPrefs.linkedEmail}` : '';
+        setGmailStatus(`Gmail autorizzata${linked}. Puoi cercare email rilevanti.`, true);
+    }
+}
+
+async function fetchGmailProfileEmail() {
+    if (!isGmailTokenValid()) {
+        return '';
+    }
+    try {
+        const response = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+            headers: {
+                Authorization: `Bearer ${gmailAccessToken}`
+            }
+        });
+        if (!response.ok) {
+            return '';
+        }
+        const payload = await response.json();
+        return String(payload?.emailAddress || '').trim();
+    } catch {
+        return '';
+    }
+}
+
+function createGmailTokenRequester() {
+    return new Promise((resolve, reject) => {
+        const config = window.matchMapGoogleConfig || {};
+        const clientId = String(config?.gmailClientId || '').trim();
+        if (!clientId) {
+            reject(new Error('Client ID Gmail non configurato in firebase-config.js'));
+            return;
+        }
+        if (!window.google?.accounts?.oauth2) {
+            reject(new Error('Google Identity Services non disponibile'));
+            return;
+        }
+        if (!gmailTokenClient) {
+            gmailTokenClient = window.google.accounts.oauth2.initTokenClient({
+                client_id: clientId,
+                scope: GMAIL_READONLY_SCOPE,
+                callback: tokenResponse => {
+                    if (!tokenResponse || tokenResponse.error) {
+                        reject(new Error(String(tokenResponse?.error || 'Autorizzazione Gmail negata')));
+                        return;
+                    }
+                    resolve(tokenResponse);
+                }
+            });
+        } else {
+            gmailTokenClient.callback = tokenResponse => {
+                if (!tokenResponse || tokenResponse.error) {
+                    reject(new Error(String(tokenResponse?.error || 'Autorizzazione Gmail negata')));
+                    return;
+                }
+                resolve(tokenResponse);
+            };
+        }
+        gmailTokenClient.requestAccessToken({
+            prompt: gmailIntegrationPrefs.enabled ? '' : 'consent'
+        });
+    });
+}
+
+async function connectGmailIntegration() {
+    try {
+        setGmailStatus('Autorizzazione Gmail in corso...');
+        const tokenResponse = await createGmailTokenRequester();
+        gmailAccessToken = String(tokenResponse?.access_token || '').trim();
+        const expiresIn = Number(tokenResponse?.expires_in || 0);
+        gmailTokenExpiresAt = Date.now() + (Number.isFinite(expiresIn) ? expiresIn * 1000 : 0);
+
+        gmailIntegrationPrefs.enabled = true;
+        const queryInput = document.getElementById('gmailQueryInput');
+        gmailIntegrationPrefs.query = String(queryInput?.value || gmailIntegrationPrefs.query || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY;
+        const profileEmail = await fetchGmailProfileEmail();
+        if (profileEmail) {
+            gmailIntegrationPrefs.linkedEmail = profileEmail;
+        }
+        await persistGmailIntegrationPrefs();
+        updateGmailUiState();
+        showDashboardToast('Gmail collegata in sola lettura (beta).', 'ok');
+    } catch (error) {
+        setGmailStatus(`Connessione Gmail fallita: ${error.message}`);
+        showDashboardToast('Connessione Gmail non riuscita.', 'err');
+    }
+}
+
+async function disconnectGmailIntegration() {
+    const previousToken = gmailAccessToken;
+    gmailAccessToken = '';
+    gmailTokenExpiresAt = 0;
+    gmailPreviewItems = [];
+    gmailSelectAllState = false;
+    gmailIntegrationPrefs.enabled = false;
+    gmailIntegrationPrefs.linkedEmail = '';
+    await persistGmailIntegrationPrefs();
+    if (window.google?.accounts?.oauth2 && previousToken) {
+        try {
+            window.google.accounts.oauth2.revoke(previousToken, () => {});
+        } catch {
+            // best effort
+        }
+    }
+    clearGmailPreview();
+    updateGmailUiState();
+    showDashboardToast('Integrazione Gmail disattivata.', 'warn');
+}
+
+async function gmailApiFetchJson(url) {
+    const response = await fetch(url, {
+        headers: {
+            Authorization: `Bearer ${gmailAccessToken}`
+        }
+    });
+
+    if (response.status === 401 || response.status === 403) {
+        gmailAccessToken = '';
+        gmailTokenExpiresAt = 0;
+        updateGmailUiState();
+        throw new Error('Sessione Gmail scaduta. Ricollega Gmail.');
+    }
+    if (!response.ok) {
+        throw new Error(`Gmail API errore ${response.status}`);
+    }
+    return response.json();
+}
+
+async function loadRelevantGmailMessages() {
+    if (!gmailIntegrationPrefs.enabled) {
+        setGmailStatus('Attiva prima la funzione Gmail beta.');
+        return;
+    }
+    if (!isGmailTokenValid()) {
+        setGmailStatus('Autorizzazione richiesta: premi Collega Gmail.');
+        return;
+    }
+
+    const { queryInput } = getGmailUiRefs();
+    const query = String(queryInput?.value || gmailIntegrationPrefs.query || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY;
+    gmailIntegrationPrefs.query = query;
+    await persistGmailIntegrationPrefs();
+
+    try {
+        setGmailStatus('Ricerca email rilevanti in corso...');
+        const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20&includeSpamTrash=false&q=${encodeURIComponent(query)}`;
+        const listData = await gmailApiFetchJson(listUrl);
+        const messages = Array.isArray(listData?.messages) ? listData.messages : [];
+        if (!messages.length) {
+            clearGmailPreview();
+            setGmailStatus('Nessuna email rilevante trovata con questo filtro.');
+            return;
+        }
+
+        const fullMessages = await Promise.all(messages.map(async msg => {
+            const id = String(msg?.id || '').trim();
+            if (!id) {
+                return null;
+            }
+            try {
+                const detailUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=full`;
+                return await gmailApiFetchJson(detailUrl);
+            } catch {
+                return null;
+            }
+        }));
+
+        gmailPreviewItems = fullMessages
+            .filter(Boolean)
+            .map(buildPreviewEventoFromMessage)
+            .filter(item => item?.id);
+
+        renderGmailPreviewList();
+        const validCount = gmailPreviewItems.filter(item => item.valid).length;
+        setGmailStatus(`Email lette: ${gmailPreviewItems.length}. Partite riconosciute: ${validCount}.`, true);
+    } catch (error) {
+        setGmailStatus(`Import Gmail fallito: ${error.message}`);
+    }
+}
+
+function toggleSelectAllGmailEvents() {
+    const validItems = gmailPreviewItems.filter(item => item.valid);
+    if (!validItems.length) {
+        return;
+    }
+    gmailSelectAllState = !gmailSelectAllState;
+    gmailPreviewItems = gmailPreviewItems.map(item => {
+        if (!item.valid) {
+            return item;
+        }
+        return {
+            ...item,
+            selected: gmailSelectAllState
+        };
+    });
+    renderGmailPreviewList();
+}
+
+async function importSelectedGmailEvents() {
+    const selectedValid = gmailPreviewItems.filter(item => item.valid && item.selected);
+    if (!selectedValid.length) {
+        setGmailStatus('Seleziona almeno una partita valida da importare.');
+        return;
+    }
+
+    const existingFingerprints = new Set(dashboardEvents.map(buildEventFingerprint));
+    let imported = 0;
+    let duplicates = 0;
+
+    for (const item of selectedValid) {
+        const evento = ensureEventoShape(item.evento || {}, 0);
+        const fingerprint = buildEventFingerprint(evento);
+        if (!fingerprint || existingFingerprints.has(fingerprint)) {
+            duplicates += 1;
+            continue;
+        }
+        existingFingerprints.add(fingerprint);
+        dashboardEvents.push(normalizeDashboardEvent({
+            data: evento.data,
+            ora: evento.ora,
+            luogo: evento.luogo || '',
+            impianto: evento.impianto || '',
+            indirizzo: evento.indirizzo || '',
+            designazioneS4yRaw: evento.designazioneS4yRaw || '',
+            locationText: evento.locationText || '',
+            squadre: evento.squadre || '',
+            categoria: evento.categoria || '',
+            garaNumero: evento.garaNumero || '',
+            girone: evento.girone || '',
+            arbitro: evento.arbitro || '',
+            rimborso: Number(evento.rimborso || 0),
+            km: Number(evento.km || 0)
+        }));
+        imported += 1;
+    }
+
+    if (!imported) {
+        setGmailStatus(`Nessun nuovo evento importato. Duplicati: ${duplicates}.`);
+        return;
+    }
+
+    renderDashboardEvents();
+    await persistDashboardEvents();
+    setGmailStatus(`Import completato. Nuovi eventi: ${imported}. Duplicati saltati: ${duplicates}.`, true);
+    showDashboardToast(`Import Gmail completato: ${imported} eventi.`, 'ok');
+}
+
+function handleGmailPreviewSelectionChange(event) {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement)) {
+        return;
+    }
+    const index = Number(target.dataset.gmailPreviewIndex);
+    if (!Number.isFinite(index) || index < 0 || index >= gmailPreviewItems.length) {
+        return;
+    }
+    gmailPreviewItems[index].selected = Boolean(target.checked);
+    renderGmailPreviewList();
+}
+
+function initGmailIntegration() {
+    const { previewList, queryInput } = getGmailUiRefs();
+    if (previewList) {
+        previewList.addEventListener('change', handleGmailPreviewSelectionChange);
+    }
+    if (queryInput) {
+        queryInput.value = GMAIL_DEFAULT_QUERY;
+        queryInput.addEventListener('change', () => {
+            gmailIntegrationPrefs.query = String(queryInput.value || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY;
+            persistGmailIntegrationPrefs();
+        });
+    }
+    loadGmailIntegrationPrefsForCurrentUser();
+}
 
 function parseDesignazione(testo) {
     const dataRegex = /(\d{2}\/\d{2}\/\d{4})/i;
@@ -1248,26 +1860,48 @@ async function syncDashboardAuthProfile(user) {
 function setDashboardAuthButtonsVisibility(user) {
     const registerBtn = document.getElementById('dashboardRegisterBtn');
     const loginBtn = document.getElementById('dashboardLoginBtn');
+    const googleLoginBtn = document.getElementById('dashboardGoogleLoginBtn');
     const logoutBtn = document.getElementById('dashboardLogoutBtn');
     const logoutLinkBtn = document.getElementById('dashboardLogoutLinkBtn');
     const credentialsGrid = document.getElementById('authCredentialsGrid');
     const mainActions = document.getElementById('authMainActions');
-    if (!registerBtn || !loginBtn || !logoutBtn || !logoutLinkBtn || !credentialsGrid || !mainActions) {
+    if (!registerBtn || !loginBtn || !googleLoginBtn || !logoutBtn || !logoutLinkBtn || !credentialsGrid || !mainActions) {
         return;
     }
     const isLogged = Boolean(user);
     registerBtn.hidden = isLogged;
     loginBtn.hidden = isLogged;
+    googleLoginBtn.hidden = isLogged;
     logoutBtn.hidden = true;
     logoutLinkBtn.hidden = !isLogged;
     credentialsGrid.hidden = isLogged;
     mainActions.hidden = isLogged;
     registerBtn.style.display = isLogged ? 'none' : '';
     loginBtn.style.display = isLogged ? 'none' : '';
+    googleLoginBtn.style.display = isLogged ? 'none' : '';
     logoutBtn.style.display = 'none';
     logoutLinkBtn.style.display = isLogged ? 'inline-flex' : 'none';
     credentialsGrid.style.display = isLogged ? 'none' : '';
     mainActions.style.display = isLogged ? 'none' : '';
+    updateDashboardGoogleLinkButton(user);
+}
+
+function hasGoogleProviderLinked(user) {
+    if (!user) {
+        return false;
+    }
+    const providers = Array.isArray(user.providerData) ? user.providerData : [];
+    return providers.some(provider => String(provider?.providerId || '').trim() === 'google.com');
+}
+
+function updateDashboardGoogleLinkButton(user) {
+    const linkBtn = document.getElementById('dashboardLinkGoogleBtn');
+    if (!linkBtn) {
+        return;
+    }
+    const shouldShow = Boolean(user) && !hasGoogleProviderLinked(user);
+    linkBtn.hidden = !shouldShow;
+    linkBtn.style.display = shouldShow ? 'inline-flex' : 'none';
 }
 
 function getCurrentDashboardUser() {
@@ -2200,6 +2834,72 @@ async function loginDashboardUser() {
     }
 }
 
+async function loginDashboardUserWithGoogle() {
+    const fb = window.matchMapFirebase;
+    if (!fb?.ready || !fb.auth || !window.firebase?.auth) {
+        setDashboardAuthStatus('Firebase non disponibile.');
+        return;
+    }
+
+    try {
+        await fb.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+        const provider = new firebase.auth.GoogleAuthProvider();
+        provider.setCustomParameters({
+            prompt: 'select_account'
+        });
+        await fb.auth.signInWithPopup(provider);
+        setDashboardAuthStatus('Login Google effettuato.', true);
+    } catch (error) {
+        const message = String(error?.message || 'Login Google fallito.');
+        setDashboardAuthStatus(`Login Google fallito: ${message}`);
+    }
+}
+
+async function linkDashboardCurrentUserWithGoogle() {
+    const fb = window.matchMapFirebase;
+    if (!fb?.ready || !fb.auth || !window.firebase?.auth) {
+        setDashboardAuthStatus('Firebase non disponibile.');
+        return;
+    }
+
+    const user = fb.auth.currentUser;
+    if (!user) {
+        setDashboardAuthStatus('Effettua prima il login con email/password.');
+        return;
+    }
+
+    if (hasGoogleProviderLinked(user)) {
+        setDashboardAuthStatus('Google e gia collegato a questo account.', true);
+        updateDashboardGoogleLinkButton(user);
+        return;
+    }
+
+    try {
+        await fb.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+        const provider = new firebase.auth.GoogleAuthProvider();
+        provider.setCustomParameters({ prompt: 'select_account' });
+        await user.linkWithPopup(provider);
+        await user.reload().catch(() => {});
+        const refreshedUser = fb.auth.currentUser || user;
+        updateDashboardGoogleLinkButton(refreshedUser);
+        setDashboardAuthStatus('Account collegato a Google con successo.', true);
+        showDashboardToast('Google collegato al tuo account MatchMap.', 'ok');
+    } catch (error) {
+        const code = String(error?.code || '').trim();
+        let message = String(error?.message || 'Impossibile collegare Google.');
+        if (code === 'auth/provider-already-linked') {
+            message = 'Google e gia collegato a questo account.';
+        } else if (code === 'auth/credential-already-in-use') {
+            message = 'Questo account Google e gia associato a un altro utente MatchMap.';
+        } else if (code === 'auth/requires-recent-login') {
+            message = 'Per sicurezza rifai login e riprova il collegamento Google.';
+        } else if (code === 'auth/popup-closed-by-user') {
+            message = 'Popup Google chiuso prima del completamento.';
+        }
+        setDashboardAuthStatus(`Collegamento Google fallito: ${message}`);
+    }
+}
+
 async function logoutDashboardUser() {
     const fb = window.matchMapFirebase;
     setPublisherAdminLinkVisible(false);
@@ -2230,6 +2930,7 @@ function initDashboardAuth() {
         setDashboardAuthButtonsVisibility(null);
         setDashboardAuthAvatar('');
         setDashboardProfileSummary(null, {});
+        loadGmailIntegrationPrefsForCurrentUser();
         loadDashboardEvents();
         return;
     }
@@ -2244,6 +2945,7 @@ function initDashboardAuth() {
             setDashboardAuthAvatar('');
             setDashboardProfileSummary(null, {});
             await loadPreferredNewsRegionForUser(null, null);
+            await loadGmailIntegrationPrefsForCurrentUser();
             await loadDashboardEvents();
             return;
         }
@@ -2252,6 +2954,7 @@ function initDashboardAuth() {
         setDashboardAuthStatus('Connessione account...', true);
         const profile = await syncDashboardAuthProfile(user);
         await loadPreferredNewsRegionForUser(user, profile?.preferredRegion);
+        await loadGmailIntegrationPrefsForCurrentUser();
         writeDashboardAuthSnapshot({
             isLogged: true,
             nickname: String(profile?.nickname || user.displayName || user.email || '').trim(),
@@ -2463,6 +3166,8 @@ async function submitUserSuggestion() {
 
 window.registerDashboardUser = registerDashboardUser;
 window.loginDashboardUser = loginDashboardUser;
+window.loginDashboardUserWithGoogle = loginDashboardUserWithGoogle;
+window.linkDashboardCurrentUserWithGoogle = linkDashboardCurrentUserWithGoogle;
 window.logoutDashboardUser = logoutDashboardUser;
 window.removeDashboardEvent = removeDashboardEvent;
 window.toggleDashboardEventPaid = toggleDashboardEventPaid;
@@ -2470,6 +3175,11 @@ window.submitUserSuggestion = submitUserSuggestion;
 window.searchSuggestionPlace = searchSuggestionPlace;
 window.searchMapPlaceFromBar = searchMapPlaceFromBar;
 window.toggleDashboardShowMore = toggleDashboardShowMore;
+window.connectGmailIntegration = connectGmailIntegration;
+window.disconnectGmailIntegration = disconnectGmailIntegration;
+window.loadRelevantGmailMessages = loadRelevantGmailMessages;
+window.importSelectedGmailEvents = importSelectedGmailEvents;
+window.toggleSelectAllGmailEvents = toggleSelectAllGmailEvents;
 
 const mapQuickSearchInput = document.getElementById('mapQuickSearchInput');
 const mapQuickSearchSuggestions = document.getElementById('mapQuickSearchSuggestions');
@@ -2555,6 +3265,7 @@ Promise.all([loadNewsDb(), loadPaymentsDb()]).then(() => {
     applyPreferredNewsRegion(true);
     renderPaymentsTable();
 });
+initGmailIntegration();
 initDashboardAuth();
 setupAuthPopover();
 ensureDashboardEventAutoRefresh();
@@ -2575,6 +3286,10 @@ if (authProfileSummaryImg) {
         authProfileSummaryImg.removeAttribute('src');
     });
 }
+
+
+
+
 
 
 

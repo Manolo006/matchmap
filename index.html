@@ -48,11 +48,15 @@
                 <div id="authMainActions" class="auth-actions">
                     <button id="dashboardRegisterBtn" type="button" onclick="registerDashboardUser()">Registrati</button>
                     <button id="dashboardLoginBtn" type="button" onclick="loginDashboardUser()">Login</button>
+                    <button id="dashboardGoogleLoginBtn" class="auth-google-btn" type="button" onclick="loginDashboardUserWithGoogle()">Continua con Google</button>
                     <button id="dashboardLogoutBtn" type="button" onclick="logoutDashboardUser()" hidden>Logout</button>
                 </div>
                 <div class="auth-actions auth-link-row">
                     <a href="account-center.html" class="auth-link-btn">Account</a>
                     <button id="dashboardLogoutLinkBtn" class="auth-link-btn auth-link-btn-danger" type="button" onclick="logoutDashboardUser()" hidden>Logout</button>
+                </div>
+                <div class="auth-actions auth-link-row auth-publisher-row">
+                    <button id="dashboardLinkGoogleBtn" class="auth-link-btn auth-google-btn" type="button" onclick="linkDashboardCurrentUserWithGoogle()" hidden>Collega Google a questo account</button>
                 </div>
                 <div class="auth-actions auth-link-row auth-publisher-row">
                     <a id="publisherAdminLink" href="publisher.html" class="auth-link-btn auth-link-btn-publisher" hidden>Publisher</a>
@@ -77,6 +81,36 @@
             <h2>Nuova designazione</h2>
             <textarea id="designazione" placeholder="Incolla qui la designazione"></textarea>
             <button class="primary-btn" onclick="aggiungiEvento()">Aggiungi Evento</button>
+            <details id="gmailImportPanel" class="gmail-panel">
+                <summary>
+                    Import Gmail (opzionale, beta)
+                    <span class="gmail-panel-badge">Advanced</span>
+                </summary>
+                <p class="gmail-privacy-note">
+                    MatchMap puo collegarsi opzionalmente alla tua Gmail per importare automaticamente le email di designazione. Vengono lette solo le email rilevanti e salvati esclusivamente i dati necessari alla gestione delle partite.
+                </p>
+                <p class="gmail-privacy-note gmail-privacy-note-secondary">
+                    Nessuna credenziale Sinfonia4You viene richiesta o salvata. MatchMap non fa scraping di Sinfonia4You: usa solo email ricevute.
+                </p>
+                <div class="gmail-actions">
+                    <button id="gmailConnectBtn" type="button" onclick="connectGmailIntegration()">Collega Gmail</button>
+                    <button id="gmailDisconnectBtn" type="button" onclick="disconnectGmailIntegration()" hidden>Scollega Gmail</button>
+                    <button id="gmailLoadBtn" type="button" onclick="loadRelevantGmailMessages()" hidden>Cerca email rilevanti</button>
+                </div>
+                <div class="gmail-query-wrap">
+                    <label for="gmailQueryInput">Filtro Gmail (solo lettura)</label>
+                    <input id="gmailQueryInput" type="text" placeholder="from:(...) subject:(...) newer_than:180d" autocomplete="off">
+                </div>
+                <p id="gmailStatus" class="auth-status">Funzione disattivata. Usa il flusso principale copia/incolla.</p>
+                <div id="gmailPreviewWrap" class="gmail-preview-wrap" hidden>
+                    <h3>Anteprima email / partite estratte</h3>
+                    <div id="gmailPreviewList" class="gmail-preview-list"></div>
+                    <div class="gmail-actions gmail-actions-bottom">
+                        <button id="gmailImportSelectedBtn" type="button" onclick="importSelectedGmailEvents()" hidden>Importa selezionati</button>
+                        <button id="gmailSelectAllBtn" type="button" onclick="toggleSelectAllGmailEvents()" hidden>Seleziona tutti</button>
+                    </div>
+                </div>
+            </details>
             <div class="total" id="rimborsoTotale">Rimborso totale: 0 &euro;</div>
         </div>
 
@@ -198,6 +232,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script src="firebase-config.js"></script>
 <script src="script.js"></script>

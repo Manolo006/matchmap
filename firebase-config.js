@@ -12,6 +12,13 @@ const firebaseConfig = {
   measurementId: "G-NSTT9VLT18"
 };
 
+    // TODO(Google OAuth): inserisci qui il client ID OAuth Web creato su Google Cloud.
+    // Scope richiesto da MatchMap Gmail beta: https://www.googleapis.com/auth/gmail.readonly
+    // Non inserire credenziali Sinfonia4You: questa integrazione usa solo Gmail read-only.
+    const matchMapGoogleConfig = {
+        gmailClientId: '529154650199-ads27665qqu05km8hedotj494p45g09f.apps.googleusercontent.com'
+    };
+
     const state = {
         ready: false,
         app: null,
@@ -36,4 +43,5 @@ const firebaseConfig = {
     }
 
     window.matchMapFirebase = state;
+    window.matchMapGoogleConfig = matchMapGoogleConfig;
 })();

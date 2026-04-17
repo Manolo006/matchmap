@@ -109,6 +109,7 @@ const TUTTOCAMPO_LOGO_OVERRIDES = {
 const loginEmail = document.getElementById('loginEmail');
 const loginPassword = document.getElementById('loginPassword');
 const loginBtn = document.getElementById('loginBtn');
+const loginGoogleBtn = document.getElementById('loginGoogleBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 const authStatus = document.getElementById('authStatus');
 const publisherAuthAvatarImg = document.getElementById('publisherAuthAvatarImg');
@@ -225,6 +226,10 @@ function setPublisherAuthControlsVisibility(user) {
     if (publisherMainAuthActions) {
         publisherMainAuthActions.hidden = isLogged;
         publisherMainAuthActions.style.display = isLogged ? 'none' : '';
+    }
+    if (loginGoogleBtn) {
+        loginGoogleBtn.hidden = isLogged;
+        loginGoogleBtn.style.display = isLogged ? 'none' : '';
     }
     if (logoutBtn) {
         logoutBtn.hidden = true;
@@ -1466,6 +1471,33 @@ async function firebaseLogin() {
     }
 }
 
+async function firebaseLoginWithGoogle() {
+    const fb = getFirebaseState();
+    if (!fb.ready || !fb.auth || !window.firebase?.auth) {
+        setStatus('Firebase non inizializzato.', 'err');
+        setLuoghiStatus('Firebase non inizializzato.', 'err');
+        setPaymentsStatus('Firebase non inizializzato.', 'err');
+        return;
+    }
+
+    try {
+        await fb.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+        const provider = new firebase.auth.GoogleAuthProvider();
+        provider.setCustomParameters({
+            prompt: 'select_account'
+        });
+        await fb.auth.signInWithPopup(provider);
+        setStatus('Login Google effettuato.', 'ok');
+        setLuoghiStatus('Login Google effettuato.', 'ok');
+        setPaymentsStatus('Login Google effettuato.', 'ok');
+    } catch (error) {
+        const message = String(error?.message || 'Login Google fallito.');
+        setStatus(`Login Google fallito: ${message}`, 'err');
+        setLuoghiStatus(`Login Google fallito: ${message}`, 'err');
+        setPaymentsStatus(`Login Google fallito: ${message}`, 'err');
+    }
+}
+
 async function firebaseLogout() {
     const fb = getFirebaseState();
     if (!fb.ready || !fb.auth) {
@@ -1936,6 +1968,9 @@ if (paymentsLoadBtn) {
 }
 
 loginBtn.addEventListener('click', firebaseLogin);
+if (loginGoogleBtn) {
+    loginGoogleBtn.addEventListener('click', firebaseLoginWithGoogle);
+}
 logoutBtn.addEventListener('click', firebaseLogout);
 if (publisherLogoutLinkBtn) {
     publisherLogoutLinkBtn.addEventListener('click', firebaseLogout);

@@ -354,6 +354,19 @@ button.primary {
     background: linear-gradient(120deg, #ef4444, #f43f5e);
 }
 
+.auth-google-btn {
+    color: #eaf2ff;
+    border-color: rgba(155, 176, 216, 0.42);
+    background: linear-gradient(120deg, rgba(29, 78, 216, 0.55), rgba(59, 130, 246, 0.5));
+}
+
+.auth-google-btn:hover,
+.auth-google-btn:focus,
+.auth-google-btn:active {
+    color: #f5f9ff;
+    background: linear-gradient(120deg, rgba(37, 99, 235, 0.7), rgba(96, 165, 250, 0.62));
+}
+
 button:hover {
     transform: translateY(-1px);
 }
