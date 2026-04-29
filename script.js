@@ -747,7 +747,7 @@ async function loadGmailIntegrationPrefsForCurrentUser() {
 
     // prova a ripristinare in automatico il token Gmail dopo refresh
     // (senza prompt consenso, best-effort)
-    if (gmailIntegrationPrefs.enabled && !isGmailTokenValid()) {
+    if (user && gmailIntegrationPrefs.enabled && !isGmailTokenValid()) {
         restoreGmailSessionSilently();
     }
 }
@@ -3044,7 +3044,7 @@ async function loginDashboardUserWithGoogle() {
         await fb.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
         const provider = new firebase.auth.GoogleAuthProvider();
         provider.setCustomParameters({
-            prompt: 'select_account'
+            prompt: 'select_account consent'
         });
         try {
             await fb.auth.signInWithPopup(provider);
@@ -3496,6 +3496,7 @@ if (authProfileSummaryImg) {
         authProfileSummaryImg.removeAttribute('src');
     });
 }
+
 
 
 

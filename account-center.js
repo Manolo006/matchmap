@@ -26,17 +26,8 @@
     ];
 
     const el = {
-        authEmail: document.getElementById('authEmail'),
-        authPassword: document.getElementById('authPassword'),
-        registerBtn: document.getElementById('registerBtn'),
-        loginBtn: document.getElementById('loginBtn'),
         logoutBtn: document.getElementById('logoutBtn'),
-        authStatus: document.getElementById('authStatus'),
         accountInfo: document.getElementById('accountInfo'),
-        resetEmailInput: document.getElementById('resetEmailInput'),
-        newEmailInput: document.getElementById('newEmailInput'),
-        sendResetBtn: document.getElementById('sendResetBtn'),
-        changeEmailBtn: document.getElementById('changeEmailBtn'),
         deleteAccountBtn: document.getElementById('deleteAccountBtn'),
         emailStatus: document.getElementById('emailStatus'),
         profileAvatarPreview: document.getElementById('profileAvatarPreview'),
@@ -242,9 +233,9 @@
 
     function renderAuthControls(user) {
         const logged = Boolean(user);
-        el.registerBtn.hidden = logged;
-        el.loginBtn.hidden = logged;
-        el.logoutBtn.hidden = !logged;
+        if (el.logoutBtn) {
+            el.logoutBtn.hidden = !logged;
+        }
     }
 
     function renderAccountInfo(user, profile) {
@@ -309,10 +300,6 @@
         el.profileImageUrlInput.value = isHttpUrl(avatarUrl) ? avatarUrl : '';
         el.profileAvatarPreview.src = resolveAvatarUrl(profile, user);
 
-        if (!el.resetEmailInput.value) {
-            el.resetEmailInput.value = user.email || '';
-        }
-        el.authEmail.value = user.email || '';
         renderAccountInfo(user, { nickname, avatarUrl, preferredRegion });
     }
 
@@ -485,107 +472,14 @@
         }
     }
 
-    async function register() {
-        if (!fb.auth) {
-            setStatus(el.authStatus, 'Firebase non inizializzato.', 'error');
-            return;
-        }
-
-        const email = el.authEmail.value.trim();
-        const password = el.authPassword.value;
-        if (!email || !password) {
-            setStatus(el.authStatus, 'Inserisci email e password.', 'error');
-            return;
-        }
-
-        try {
-            await fb.auth.createUserWithEmailAndPassword(email, password);
-            setStatus(el.authStatus, 'Registrazione completata.', 'ok');
-            el.authPassword.value = '';
-        } catch (error) {
-            setStatus(el.authStatus, 'Registrazione fallita: ' + normalizeError(error), 'error');
-        }
-    }
-
-    async function login() {
-        if (!fb.auth) {
-            setStatus(el.authStatus, 'Firebase non inizializzato.', 'error');
-            return;
-        }
-
-        const email = el.authEmail.value.trim();
-        const password = el.authPassword.value;
-        if (!email || !password) {
-            setStatus(el.authStatus, 'Inserisci email e password.', 'error');
-            return;
-        }
-
-        try {
-            await fb.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-            await fb.auth.signInWithEmailAndPassword(email, password);
-            setStatus(el.authStatus, 'Login effettuato.', 'ok');
-            el.authPassword.value = '';
-        } catch (error) {
-            setStatus(el.authStatus, 'Login fallito: ' + normalizeError(error), 'error');
-        }
-    }
-
     async function logout() {
         if (!fb.auth) return;
         try {
             await fb.auth.signOut();
-            setStatus(el.authStatus, 'Logout effettuato.', 'ok');
             setStatus(el.emailStatus, '');
             setStatus(el.profileStatus, 'Sessione chiusa.');
         } catch (error) {
-            setStatus(el.authStatus, 'Logout fallito: ' + normalizeError(error), 'error');
-        }
-    }
-
-    async function sendReset() {
-        if (!fb.auth) {
-            setStatus(el.emailStatus, 'Firebase non inizializzato.', 'error');
-            return;
-        }
-
-        const email = el.resetEmailInput.value.trim();
-        if (!email) {
-            setStatus(el.emailStatus, 'Inserisci email per reset password.', 'error');
-            return;
-        }
-
-        try {
-            fb.auth.languageCode = 'it';
-            await fb.auth.sendPasswordResetEmail(email);
-            setStatus(el.emailStatus, 'Email reset inviata a ' + email + '.', 'ok');
-        } catch (error) {
-            setStatus(el.emailStatus, 'Invio reset fallito: ' + normalizeError(error), 'error');
-        }
-    }
-
-    async function changeEmail() {
-        const user = getUser();
-        if (!user) {
-            setStatus(el.emailStatus, 'Login richiesto per cambiare email.', 'error');
-            return;
-        }
-
-        const newEmail = el.newEmailInput.value.trim();
-        const currentPassword = window.prompt('Inserisci la password attuale per confermare il cambio email:') || '';
-        if (!newEmail || !currentPassword) {
-            setStatus(el.emailStatus, 'Nuova email o password attuale mancanti.', 'error');
-            return;
-        }
-
-        try {
-            const credential = firebase.auth.EmailAuthProvider.credential(user.email, currentPassword);
-            await user.reauthenticateWithCredential(credential);
-            await user.updateEmail(newEmail);
-            await user.reload();
-            await loadProfile(getUser());
-            setStatus(el.emailStatus, 'Email aggiornata.', 'ok');
-        } catch (error) {
-            setStatus(el.emailStatus, 'Cambio email fallito: ' + normalizeError(error), 'error');
+            setStatus(el.emailStatus, 'Logout fallito: ' + normalizeError(error), 'error');
         }
     }
 
@@ -624,16 +518,12 @@
     }
 
     function bindEvents() {
-        el.registerBtn.addEventListener('click', register);
-        el.loginBtn.addEventListener('click', login);
-        el.logoutBtn.addEventListener('click', logout);
-        el.sendResetBtn.addEventListener('click', sendReset);
-        el.changeEmailBtn.addEventListener('click', changeEmail);
-        el.deleteAccountBtn.addEventListener('click', deleteAccount);
-        el.saveProfileBtn.addEventListener('click', saveProfile);
-        el.removeAvatarBtn.addEventListener('click', removeAvatarDraft);
-        el.profileImageFile.addEventListener('change', handleAvatarFileChange);
-        el.profileImageUrlInput.addEventListener('input', () => {
+        if (el.logoutBtn) el.logoutBtn.addEventListener('click', logout);
+        if (el.deleteAccountBtn) el.deleteAccountBtn.addEventListener('click', deleteAccount);
+        if (el.saveProfileBtn) el.saveProfileBtn.addEventListener('click', saveProfile);
+        if (el.removeAvatarBtn) el.removeAvatarBtn.addEventListener('click', removeAvatarDraft);
+        if (el.profileImageFile) el.profileImageFile.addEventListener('change', handleAvatarFileChange);
+        if (el.profileImageUrlInput) el.profileImageUrlInput.addEventListener('input', () => {
             const raw = String(el.profileImageUrlInput.value || '').trim();
             uploadedAvatarDataUrl = '';
             if (isHttpUrl(raw)) {
@@ -649,7 +539,7 @@
         bindEvents();
 
         if (!fb.ready || !fb.auth) {
-            setStatus(el.authStatus, 'Firebase non inizializzato.', 'error');
+            setStatus(el.emailStatus, 'Firebase non inizializzato.', 'error');
             renderAuthControls(null);
             renderAccountInfo(null, {});
             return;
@@ -658,10 +548,10 @@
         fb.auth.onAuthStateChanged(async user => {
             renderAuthControls(user);
             if (user) {
-                setStatus(el.authStatus, 'Connesso come ' + (user.email || user.uid), 'ok');
+                setStatus(el.emailStatus, 'Connesso come ' + (user.email || user.uid), 'ok');
                 await loadProfile(user);
             } else {
-                setStatus(el.authStatus, 'Non autenticato.');
+                setStatus(el.emailStatus, 'Non autenticato.');
                 await loadProfile(null);
             }
         });
