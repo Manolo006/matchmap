@@ -41,22 +41,13 @@
                     <img id="authProfileSummaryImg" class="auth-profile-summary-img" src="" alt="" hidden>
                     <span id="authProfileSummaryName"></span>
                 </div>
-                <div id="authCredentialsGrid" class="auth-grid">
-                    <input id="userEmail" type="email" placeholder="Email">
-                    <input id="userPassword" type="password" placeholder="Password">
-                </div>
                 <div id="authMainActions" class="auth-actions">
-                    <button id="dashboardRegisterBtn" type="button" onclick="registerDashboardUser()">Registrati</button>
-                    <button id="dashboardLoginBtn" type="button" onclick="loginDashboardUser()">Login</button>
                     <button id="dashboardGoogleLoginBtn" class="auth-google-btn" type="button" onclick="loginDashboardUserWithGoogle()">Continua con Google</button>
                     <button id="dashboardLogoutBtn" type="button" onclick="logoutDashboardUser()" hidden>Logout</button>
                 </div>
                 <div class="auth-actions auth-link-row">
                     <a href="account-center.html" class="auth-link-btn">Account</a>
                     <button id="dashboardLogoutLinkBtn" class="auth-link-btn auth-link-btn-danger" type="button" onclick="logoutDashboardUser()" hidden>Logout</button>
-                </div>
-                <div class="auth-actions auth-link-row auth-publisher-row">
-                    <button id="dashboardLinkGoogleBtn" class="auth-link-btn auth-google-btn" type="button" onclick="linkDashboardCurrentUserWithGoogle()" hidden>Collega Google a questo account</button>
                 </div>
                 <div class="auth-actions auth-link-row auth-publisher-row">
                     <a id="publisherAdminLink" href="publisher.html" class="auth-link-btn auth-link-btn-publisher" hidden>Publisher</a>

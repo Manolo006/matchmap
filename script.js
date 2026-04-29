@@ -744,6 +744,30 @@ async function loadGmailIntegrationPrefsForCurrentUser() {
         queryInput.value = gmailIntegrationPrefs.query || GMAIL_DEFAULT_QUERY;
     }
     updateGmailUiState();
+
+    // prova a ripristinare in automatico il token Gmail dopo refresh
+    // (senza prompt consenso, best-effort)
+    if (gmailIntegrationPrefs.enabled && !isGmailTokenValid()) {
+        restoreGmailSessionSilently();
+    }
+}
+
+async function restoreGmailSessionSilently() {
+    try {
+        const tokenResponse = await createGmailTokenRequester();
+        const token = String(tokenResponse?.access_token || '').trim();
+        if (!token) {
+            return;
+        }
+        gmailAccessToken = token;
+        const expiresIn = Number(tokenResponse?.expires_in || 0);
+        gmailTokenExpiresAt = Date.now() + (Number.isFinite(expiresIn) ? expiresIn * 1000 : 0);
+        updateGmailUiState();
+        setGmailStatus('Sessione Gmail ripristinata automaticamente.', true);
+    } catch {
+        // normale: in alcuni browser/account Google richiede comunque interazione utente
+        updateGmailUiState();
+    }
 }
 
 function decodeBase64Url(value) {
@@ -832,9 +856,6 @@ function formatTimestampAsMatchMapDate(timestampValue) {
 
 function ensureEventoShape(evento, fallbackTimestamp = 0) {
     const item = { ...(evento || {}) };
-    if (!item.data) {
-        item.data = formatTimestampAsMatchMapDate(fallbackTimestamp);
-    }
     if (!item.ora) {
         const fallback = String(item._gmailDate || '').match(/\b([01]\d|2[0-3]):([0-5]\d)\b/);
         item.ora = fallback ? `${fallback[1]}:${fallback[2]}` : '';
@@ -853,7 +874,12 @@ function buildPreviewEventoFromMessage(message) {
     const body = extractBodyFromGmailPayload(payload);
     const snippet = String(message?.snippet || '').trim();
 
-    const parsedFromBody = parseDesignazione(body || snippet);
+    const sourceText = body || snippet;
+    const sourceMetaText = `${subject || ''} ${snippet || ''} ${body || ''}`;
+    const parsedFromBody = parseDesignazione(sourceText, {
+        emailDateHeader: dateHeader,
+        emailInternalTimestamp: Number(message?.internalDate || 0)
+    });
     const evento = ensureEventoShape({
         ...parsedFromBody,
         _gmailMessageId: String(message?.id || ''),
@@ -864,7 +890,27 @@ function buildPreviewEventoFromMessage(message) {
         _gmailSnippet: snippet
     }, Number(message?.internalDate || 0));
 
-    const valid = Boolean(evento.data && evento.ora && evento.squadre);
+    const hasActivityArbitro = /\battivit[àa]\s*:\s*arbitro\b/i.test(sourceText);
+    const hasCategoria = /\bcategoria\s*:/i.test(sourceText);
+    const hasData = /\bdata\s*:/i.test(sourceText);
+    const hasOra = /\bora\s*:/i.test(sourceText);
+    const hasCampo = /\bcampo\s*:/i.test(sourceText);
+    const hasKm = /\bdistanza\s*\(\s*km\s*\)\s*:/i.test(sourceText);
+    const hasRimborsoLabel = /\brimborso\s+totale\s*\(\s*€\s*\)\s*:/i.test(sourceText);
+    const hasRimborsoPositive = Number(evento.rimborso || 0) > 0;
+    const valid = Boolean(
+        hasActivityArbitro &&
+        hasCategoria &&
+        hasData &&
+        hasOra &&
+        hasCampo &&
+        hasKm &&
+        hasRimborsoLabel &&
+        hasRimborsoPositive &&
+        evento.data &&
+        evento.ora &&
+        evento.categoria
+    );
     return {
         id: String(message?.id || ''),
         selected: valid,
@@ -975,8 +1021,9 @@ async function fetchGmailProfileEmail() {
     }
 }
 
-function createGmailTokenRequester() {
+function createGmailTokenRequester(options = {}) {
     return new Promise((resolve, reject) => {
+        const silent = Boolean(options?.silent);
         const config = window.matchMapGoogleConfig || {};
         const clientId = String(config?.gmailClientId || '').trim();
         if (!clientId) {
@@ -991,6 +1038,7 @@ function createGmailTokenRequester() {
             gmailTokenClient = window.google.accounts.oauth2.initTokenClient({
                 client_id: clientId,
                 scope: GMAIL_READONLY_SCOPE,
+                include_granted_scopes: true,
                 callback: tokenResponse => {
                     if (!tokenResponse || tokenResponse.error) {
                         reject(new Error(String(tokenResponse?.error || 'Autorizzazione Gmail negata')));
@@ -1008,8 +1056,10 @@ function createGmailTokenRequester() {
                 resolve(tokenResponse);
             };
         }
+        const loginHint = String(gmailIntegrationPrefs?.linkedEmail || '').trim();
         gmailTokenClient.requestAccessToken({
-            prompt: gmailIntegrationPrefs.enabled ? '' : 'consent'
+            prompt: silent ? 'none' : (gmailIntegrationPrefs.enabled ? '' : 'consent'),
+            login_hint: loginHint || undefined
         });
     });
 }
@@ -1017,7 +1067,7 @@ function createGmailTokenRequester() {
 async function connectGmailIntegration() {
     try {
         setGmailStatus('Autorizzazione Gmail in corso...');
-        const tokenResponse = await createGmailTokenRequester();
+        const tokenResponse = await createGmailTokenRequester({ silent: false });
         gmailAccessToken = String(tokenResponse?.access_token || '').trim();
         const expiresIn = Number(tokenResponse?.expires_in || 0);
         gmailTokenExpiresAt = Date.now() + (Number.isFinite(expiresIn) ? expiresIn * 1000 : 0);
@@ -1120,7 +1170,7 @@ async function loadRelevantGmailMessages() {
         gmailPreviewItems = fullMessages
             .filter(Boolean)
             .map(buildPreviewEventoFromMessage)
-            .filter(item => item?.id);
+            .filter(item => item?.id && item.valid);
 
         renderGmailPreviewList();
         const validCount = gmailPreviewItems.filter(item => item.valid).length;
@@ -1225,19 +1275,51 @@ function initGmailIntegration() {
     loadGmailIntegrationPrefsForCurrentUser();
 }
 
-function parseDesignazione(testo) {
-    const dataRegex = /(\d{2}\/\d{2}\/\d{4})/i;
-    const oraRegex = /alle ore\s*(\d{2}:\d{2})/i;
+function parseDesignazione(testo, options = {}) {
+    const extractFieldByLabel = (labelRegexSource, nextLabelSources = []) => {
+        const nextBlock = nextLabelSources.length
+            ? `(?=\\b(?:${nextLabelSources.join('|')})\\s*:)`
+            : '(?=$)';
+        const pattern = new RegExp(`\\b(?:${labelRegexSource})\\s*:\\s*([\\s\\S]*?)${nextBlock}`, 'i');
+        const match = String(testo || '').match(pattern);
+        return String(match?.[1] || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    };
+
+    const fieldOrder = [
+        'Attivit[àa]',
+        'Comitato\\/Delegazione',
+        'Categoria',
+        'Girone',
+        'Giornata',
+        'Numero\\s+Gara',
+        'Gara',
+        'Data',
+        'Ora',
+        'Campo',
+        'Indirizzo',
+        'Localit[àa]',
+        'Provincia',
+        'Distanza\\s*\\(\\s*km\\s*\\)',
+        'Rimborso\\s+Totale\\s*\\(\\s*€\\s*\\)'
+    ];
+
+    const dataLabelRegex = /\bdata(?:\s+gara)?\s*[:\-]?\s*(?:[A-ZÀ-Úa-zà-ú]+\s+)?(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/i;
+    const dataRegex = /(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/i;
+    const oraRegex = /\bora\s*[:\-]?\s*([01]?\d|2[0-3])[:.]([0-5]\d)\b/i;
+    const oraFallbackRegex = /\b(?:ore\s*)?([01]\d|2[0-3])[:.]([0-5]\d)\b/i;
     const luogoRegex = /a\s+(.+?)\s+sull['’]impianto/i;
     const impiantoRegex = /sull['’]impianto\s+(.+?)\s+sito in/i;
     const indirizzoRegex = /sito in\s+([^\r\n]+)/i;
-    const squadreRegex = /tra\s*[\r\n]+([^\r\n]+)\s*[\r\n]+/i;
-    const categoriaRegex = /(U\d+\s[\w\s]+MASCHILE)/i;
-    const garaNumeroRegex = /gara\s*n\.?\s*(\d+)/i;
+    const squadreRegex = /tra\s*[:\-]?\s*([^\r\n]+)/i;
+    const squadreVsRegex = /\b([A-Z0-9][A-Z0-9\s'.-]{2,}?)\s*(?:-|–|—|vs\.?|v\.?s\.?|contro)\s*([A-Z0-9][A-Z0-9\s'.-]{2,})\b/i;
+    const categoriaRegex = /\bcategoria\s*:\s*([^\r\n]+)/i;
+    const garaNumeroRegex = /\b(?:numero\s+gara|gara\s*n\.?)\s*[:\-]?\s*(\d+)/i;
     const gironeRegex = /girone\s+([A-Z0-9]+)/i;
     const arbitroRegex = /^([A-Z\s'`]+),\s*sei designato/i;
-    const rimborsoRegex = /Rimborso:\s*(\d+)\s*[€\u20AC]/i;
-    const kmRegex = /\((\d+)\s*Km\)/i;
+    const rimborsoRegex = /\brimborso\s+totale\s*\(\s*€\s*\)\s*:\s*(\d+(?:[\.,]\d{1,2})?)/i;
+    const kmRegex = /\bdistanza\s*\(\s*km\s*\)\s*:\s*(\d+)/i;
     const designazioneS4yRegex = /a\s+(.+?)\s+sull['’]impianto\s+(.+?)\s+sito in\s+([^\r\n]+)/i;
 
     const luogo = testo.match(luogoRegex)?.[1]?.trim() || '';
@@ -1249,20 +1331,161 @@ function parseDesignazione(testo) {
         : '';
     const locationText = [luogo, impianto, indirizzo].filter(Boolean).join(', ');
 
+    const oraMainMatch = testo.match(oraRegex);
+    const oraMain = oraMainMatch ? `${String(oraMainMatch[1]).padStart(2, '0')}:${oraMainMatch[2]}` : '';
+    const oraFallback = testo.match(oraFallbackRegex);
+    const oraValue = oraMain || (oraFallback ? `${oraFallback[1]}:${oraFallback[2]}` : '');
+
+    const garaFromTable = extractFieldByLabel('Gara', fieldOrder.filter(x => x !== 'Gara'));
+
+    const extractGaraSegment = sourceText => {
+        const text = String(sourceText || '');
+        if (!text) return '';
+
+        const labelRegex = /\bGara\s*:\s*/gi;
+        let match;
+        let lastStart = -1;
+        while ((match = labelRegex.exec(text)) !== null) {
+            const before = text.slice(Math.max(0, match.index - 24), match.index);
+            // evita il falso positivo su "Numero Gara :"
+            if (/Numero\s*$/i.test(before)) {
+                continue;
+            }
+            lastStart = match.index + match[0].length;
+        }
+        if (lastStart < 0) return '';
+
+        const tail = text.slice(lastStart);
+        const stop = tail.match(/\b(?:Data|Ora|Campo|Indirizzo|Localit[àa]|Provincia|Distanza\s*\(\s*km\s*\)|Rimborso\s+Totale\s*\(\s*€\s*\)|Accedi\s+a\s+Sinfonia4You|EMAIL\s+GENERATA\s+AUTOMATICAMENTE|Attivit[àa]|Comitato\/Delegazione|Categoria|Girone|Giornata|Numero\s+Gara)\s*:/i);
+        const segment = stop ? tail.slice(0, stop.index) : tail;
+        return String(segment).replace(/\s+/g, ' ').trim();
+    };
+
+    const garaLineRaw = extractGaraSegment(testo);
+    const garaLineClean = String(garaLineRaw)
+        .replace(/\b(?:Data|Ora|Campo|Indirizzo|Localit[àa]|Provincia|Distanza\s*\(\s*km\s*\)|Rimborso\s+Totale\s*\(\s*€\s*\)|Accedi\s+a\s+Sinfonia4You|EMAIL\s+GENERATA\s+AUTOMATICAMENTE)\b[\s\S]*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const normalizeTeamsPair = raw => {
+        const cleaned = String(raw || '').replace(/\s+/g, ' ').trim();
+        if (!cleaned) return '';
+        const parts = cleaned
+            .split(/\s*(?:-|–|—|vs\.?|v\.?s\.?)\s*/i)
+            .map(x => x.trim())
+            .filter(Boolean);
+        if (parts.length < 2) return '';
+        const teamA = parts[0];
+        const teamB = parts[1];
+        if (!teamA || !teamB) return '';
+        if (/:/.test(teamA) || /:/.test(teamB)) return '';
+        return `${teamA} - ${teamB}`;
+    };
+
+    const squadreFromGaraDirect = (() => {
+        const garaSegment = extractGaraSegment(testo);
+        const m = String(garaSegment || '').match(/^\s*(.*?)\s*(?:-|–|—|vs\.?|v\.?s\.?)\s*(.*?)\s*$/i);
+        if (!m) return '';
+        const a = String(m[1] || '').replace(/\s+/g, ' ').trim();
+        const b = String(m[2] || '').replace(/\s+/g, ' ').trim();
+        if (!a || !b) return '';
+        if (/:/.test(a) || /:/.test(b)) return '';
+        return `${a} - ${b}`;
+    })();
+
+    const squadreMain = squadreFromGaraDirect || normalizeTeamsPair(garaLineClean) || normalizeTeamsPair(garaFromTable) || normalizeTeamsPair(testo.match(squadreRegex)?.[1]?.trim() || '') || '';
+    const squadreVs = testo.match(squadreVsRegex);
+    let squadreValue = squadreMain || (squadreVs ? `${squadreVs[1].trim()} - ${squadreVs[2].trim()}` : '');
+
+    // pulizia anti-rumore: evita subject/footer Gmail tipo
+    // "Designazione ... AIA - Sinfonia4You Notifica ..."
+    squadreValue = String(squadreValue || '')
+        .replace(/\bdesignazione\b[\s\S]*$/i, '')
+        .replace(/\bnotifica\s+di\s+designazione\b[\s\S]*$/i, '')
+        .replace(/\bsinfonia\s*4\s*you\b[\s\S]*$/i, '')
+        .replace(/\baia\b\s*-\s*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    // fallback forte: se resta vuoto o sporco, riprova dalla sola riga Gara:
+    if (!squadreValue || /sinfonia|notifica|associato|designazione/i.test(squadreValue)) {
+        const garaStrict = String(testo || '').match(/\bGara\s*:\s*([^\r\n]+)/i)?.[1] || '';
+        const garaStrictClean = String(garaStrict)
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (garaStrictClean) {
+            squadreValue = garaStrictClean;
+        }
+    }
+
+    // hard filter: tieni SOLO formato partita "TEAM A - TEAM B"
+    // se ci sono label (":") o parole tipiche del template, annulla e ricalcola da Gara:
+    if (/[:]|attivit|categoria|girone|giornata|numero\s+gara|data|ora|campo|indirizzo|localit|provincia|distanza|rimborso/i.test(squadreValue)) {
+        const garaOnly = String(testo || '').match(/\bGara\s*:\s*([^\r\n]+)/i)?.[1] || '';
+        squadreValue = String(garaOnly)
+            .replace(/\b(?:Data|Ora|Campo|Indirizzo|Localit[àa]|Provincia|Distanza\s*\(\s*km\s*\)|Rimborso\s+Totale\s*\(\s*€\s*\)|Accedi\s+a\s+Sinfonia4You|EMAIL\s+GENERATA\s+AUTOMATICAMENTE)\b[\s\S]*$/i, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    // ultimo guardrail: ritorna SOLO "SQUADRA A - SQUADRA B"
+    squadreValue = normalizeTeamsPair(squadreValue);
+
+    const rimborsoRaw = testo.match(rimborsoRegex)?.[1] || '0';
+    const rimborsoValue = Number(String(rimborsoRaw).replace(',', '.')) || 0;
+
+    const emailYearFromHeader = (() => {
+        const rawHeader = String(options?.emailDateHeader || '').trim();
+        const fromHeaderMatch = rawHeader.match(/\b(20\d{2})\b/);
+        if (fromHeaderMatch) {
+            return Number(fromHeaderMatch[1]);
+        }
+        const ts = Number(options?.emailInternalTimestamp || 0);
+        if (Number.isFinite(ts) && ts > 0) {
+            return new Date(ts).getFullYear();
+        }
+        return new Date().getFullYear();
+    })();
+
+    const normalizeMatchDate = rawDate => {
+        const value = String(rawDate || '').trim();
+        if (!value) {
+            return '';
+        }
+        const parts = value.split('/').map(x => x.trim());
+        if (parts.length < 2) {
+            return '';
+        }
+        const dd = String(parts[0]).padStart(2, '0');
+        const mm = String(parts[1]).padStart(2, '0');
+        let yy = String(parts[2] || '').trim();
+        if (!yy) {
+            yy = String(emailYearFromHeader);
+        } else if (yy.length === 2) {
+            yy = `20${yy}`;
+        }
+        return `${dd}/${mm}/${yy}`;
+    };
+
+    const rawDateValue = testo.match(dataLabelRegex)?.[1]?.trim() || testo.match(dataRegex)?.[1]?.trim() || '';
+    const dataValue = normalizeMatchDate(rawDateValue);
+
+    const categoriaFromTable = extractFieldByLabel('Categoria', fieldOrder.filter(x => x !== 'Categoria'));
+
     return {
-        data: testo.match(dataRegex)?.[1]?.trim() || '',
-        ora: testo.match(oraRegex)?.[1]?.trim() || '',
+        data: dataValue,
+        ora: oraValue,
         luogo,
         impianto,
         indirizzo,
         designazioneS4yRaw,
         locationText,
-        squadre: testo.match(squadreRegex)?.[1]?.trim() || '',
-        categoria: testo.match(categoriaRegex)?.[1]?.trim() || '',
+        squadre: squadreValue,
+        categoria: categoriaFromTable || testo.match(categoriaRegex)?.[1]?.trim() || '',
         garaNumero: testo.match(garaNumeroRegex)?.[1]?.trim() || '',
         girone: testo.match(gironeRegex)?.[1]?.trim() || '',
         arbitro: testo.match(arbitroRegex)?.[1]?.trim() || '',
-        rimborso: Number(testo.match(rimborsoRegex)?.[1] || 0),
+        rimborso: rimborsoValue,
         km: Number(testo.match(kmRegex)?.[1] || 0)
     };
 }
@@ -1274,10 +1497,25 @@ function buildEventFingerprint(evento) {
         evento.ora || '',
         evento.squadre || '',
         evento.categoria || '',
-        evento.luogo || '',
-        evento.impianto || ''
+        Number(evento.rimborso || 0) || 0
     ];
     return normalizeText(keyParts.join('|'));
+}
+
+function dedupeDashboardEvents(events) {
+    const list = Array.isArray(events) ? events : [];
+    const seen = new Set();
+    const out = [];
+    list.forEach(raw => {
+        const evento = normalizeDashboardEvent(raw);
+        const fp = buildEventFingerprint(evento);
+        if (!fp || seen.has(fp)) {
+            return;
+        }
+        seen.add(fp);
+        out.push(evento);
+    });
+    return out;
 }
 
 function buildAutoFieldSuggestionKey(evento) {
@@ -1858,30 +2096,21 @@ async function syncDashboardAuthProfile(user) {
 }
 
 function setDashboardAuthButtonsVisibility(user) {
-    const registerBtn = document.getElementById('dashboardRegisterBtn');
-    const loginBtn = document.getElementById('dashboardLoginBtn');
     const googleLoginBtn = document.getElementById('dashboardGoogleLoginBtn');
     const logoutBtn = document.getElementById('dashboardLogoutBtn');
     const logoutLinkBtn = document.getElementById('dashboardLogoutLinkBtn');
-    const credentialsGrid = document.getElementById('authCredentialsGrid');
     const mainActions = document.getElementById('authMainActions');
-    if (!registerBtn || !loginBtn || !googleLoginBtn || !logoutBtn || !logoutLinkBtn || !credentialsGrid || !mainActions) {
+    if (!googleLoginBtn || !logoutBtn || !logoutLinkBtn || !mainActions) {
         return;
     }
     const isLogged = Boolean(user);
-    registerBtn.hidden = isLogged;
-    loginBtn.hidden = isLogged;
     googleLoginBtn.hidden = isLogged;
     logoutBtn.hidden = true;
     logoutLinkBtn.hidden = !isLogged;
-    credentialsGrid.hidden = isLogged;
     mainActions.hidden = isLogged;
-    registerBtn.style.display = isLogged ? 'none' : '';
-    loginBtn.style.display = isLogged ? 'none' : '';
     googleLoginBtn.style.display = isLogged ? 'none' : '';
     logoutBtn.style.display = 'none';
     logoutLinkBtn.style.display = isLogged ? 'inline-flex' : 'none';
-    credentialsGrid.style.display = isLogged ? 'none' : '';
     mainActions.style.display = isLogged ? 'none' : '';
     updateDashboardGoogleLinkButton(user);
 }
@@ -1899,7 +2128,7 @@ function updateDashboardGoogleLinkButton(user) {
     if (!linkBtn) {
         return;
     }
-    const shouldShow = Boolean(user) && !hasGoogleProviderLinked(user);
+    const shouldShow = false;
     linkBtn.hidden = !shouldShow;
     linkBtn.style.display = shouldShow ? 'inline-flex' : 'none';
 }
@@ -2267,6 +2496,7 @@ async function removeDashboardEvent(index) {
         return;
     }
     dashboardEvents.splice(index, 1);
+    dashboardEvents = dedupeDashboardEvents(dashboardEvents);
     renderDashboardEvents();
     await persistDashboardEvents();
 }
@@ -2282,6 +2512,7 @@ async function toggleDashboardEventPaid(index) {
 
 async function persistDashboardEvents() {
     const user = getCurrentDashboardUser();
+    dashboardEvents = dedupeDashboardEvents(dashboardEvents);
     const payload = dashboardEvents.map(normalizeDashboardEvent);
     if (user) {
         const { fb } = getDashboardAuthState();
@@ -2304,7 +2535,7 @@ async function loadDashboardEvents() {
             const snap = await fb.db.ref(`users/${user.uid}/dashboard/events`).once('value');
             const raw = snap.exists() ? snap.val() : [];
             const list = Array.isArray(raw) ? raw : Object.values(raw || {});
-            dashboardEvents = list.map(normalizeDashboardEvent);
+            dashboardEvents = dedupeDashboardEvents(list.map(normalizeDashboardEvent));
             renderDashboardEvents();
             return;
         } catch (error) {
@@ -2314,7 +2545,7 @@ async function loadDashboardEvents() {
 
     try {
         const raw = JSON.parse(localStorage.getItem(GUEST_EVENTS_STORAGE_KEY) || '[]');
-        dashboardEvents = (Array.isArray(raw) ? raw : []).map(normalizeDashboardEvent);
+        dashboardEvents = dedupeDashboardEvents((Array.isArray(raw) ? raw : []).map(normalizeDashboardEvent));
     } catch (error) {
         dashboardEvents = [];
     }
@@ -2337,6 +2568,7 @@ async function aggiungiEvento() {
     }
 
     dashboardEvents.push(normalizeDashboardEvent(evento));
+    dashboardEvents = dedupeDashboardEvents(dashboardEvents);
     renderDashboardEvents();
     await persistDashboardEvents();
     await autoSuggestFieldFromDesignazione(evento);
@@ -2794,44 +3026,11 @@ function renderPaymentsTable() {
 }
 
 async function registerDashboardUser() {
-    const email = document.getElementById('userEmail')?.value?.trim();
-    const password = document.getElementById('userPassword')?.value || '';
-    const fb = window.matchMapFirebase;
-    if (!fb?.ready || !fb.auth) {
-        setDashboardAuthStatus('Firebase non disponibile.');
-        return;
-    }
-    if (!email || !password) {
-        setDashboardAuthStatus('Inserisci email e password.');
-        return;
-    }
-    try {
-        await fb.auth.createUserWithEmailAndPassword(email, password);
-        setDashboardAuthStatus(`Registrato e autenticato: ${email}`, true);
-    } catch (error) {
-        setDashboardAuthStatus(`Registrazione fallita: ${error.message}`);
-    }
+    setDashboardAuthStatus('Registrazione email/password disattivata. Usa Continua con Google.');
 }
 
 async function loginDashboardUser() {
-    const email = document.getElementById('userEmail')?.value?.trim();
-    const password = document.getElementById('userPassword')?.value || '';
-    const fb = window.matchMapFirebase;
-    if (!fb?.ready || !fb.auth) {
-        setDashboardAuthStatus('Firebase non disponibile.');
-        return;
-    }
-    if (!email || !password) {
-        setDashboardAuthStatus('Inserisci email e password.');
-        return;
-    }
-    try {
-        await fb.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-        await fb.auth.signInWithEmailAndPassword(email, password);
-        setDashboardAuthStatus(`Login effettuato: ${email}`, true);
-    } catch (error) {
-        setDashboardAuthStatus(`Login fallito: ${error.message}`);
-    }
+    setDashboardAuthStatus('Login email/password disattivato. Usa Continua con Google.');
 }
 
 async function loginDashboardUserWithGoogle() {
@@ -2847,57 +3046,64 @@ async function loginDashboardUserWithGoogle() {
         provider.setCustomParameters({
             prompt: 'select_account'
         });
-        await fb.auth.signInWithPopup(provider);
-        setDashboardAuthStatus('Login Google effettuato.', true);
+        try {
+            await fb.auth.signInWithPopup(provider);
+            setDashboardAuthStatus('Login Google effettuato.', true);
+        } catch (popupError) {
+            const code = String(popupError?.code || '').trim();
+            const shouldFallbackToRedirect = code === 'auth/popup-blocked'
+                || code === 'auth/cancelled-popup-request'
+                || code === 'auth/operation-not-supported-in-this-environment';
+            if (!shouldFallbackToRedirect) {
+                throw popupError;
+            }
+
+            await fb.auth.signInWithRedirect(provider);
+            setDashboardAuthStatus('Reindirizzamento Google avviato...');
+        }
     } catch (error) {
-        const message = String(error?.message || 'Login Google fallito.');
-        setDashboardAuthStatus(`Login Google fallito: ${message}`);
+        setDashboardAuthStatus(`Login Google fallito: ${describeFirebaseAuthError(error, 'google-login')}`);
     }
 }
 
 async function linkDashboardCurrentUserWithGoogle() {
-    const fb = window.matchMapFirebase;
-    if (!fb?.ready || !fb.auth || !window.firebase?.auth) {
-        setDashboardAuthStatus('Firebase non disponibile.');
-        return;
+    setDashboardAuthStatus('Funzione non necessaria: accesso consentito solo con Google.');
+}
+
+function describeFirebaseAuthError(error, context = '') {
+    const code = String(error?.code || '').trim();
+    const rawMessage = String(error?.message || '').trim();
+    const rawLower = rawMessage.toLowerCase();
+    const base = rawMessage || 'Errore autenticazione non previsto.';
+
+    if (rawLower.includes('org_internal') || rawLower.includes('error 403') || rawLower.includes('errore 403')) {
+        return 'Google OAuth bloccato (errore 403 org_internal). In Google Cloud imposta OAuth consent screen come External oppure aggiungi il tuo account tra Test users.';
     }
 
-    const user = fb.auth.currentUser;
-    if (!user) {
-        setDashboardAuthStatus('Effettua prima il login con email/password.');
-        return;
+    if (code === 'auth/invalid-email') return 'Email non valida.';
+    if (code === 'auth/missing-password') return 'Password mancante.';
+    if (code === 'auth/weak-password') return 'Password troppo debole (minimo 6 caratteri).';
+    if (code === 'auth/email-already-in-use') return 'Email gia registrata. Prova Login.';
+    if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential') {
+        return 'Credenziali non corrette.';
     }
-
-    if (hasGoogleProviderLinked(user)) {
-        setDashboardAuthStatus('Google e gia collegato a questo account.', true);
-        updateDashboardGoogleLinkButton(user);
-        return;
+    if (code === 'auth/too-many-requests') return 'Troppi tentativi. Riprova tra poco.';
+    if (code === 'auth/network-request-failed') return 'Errore rete. Controlla connessione.';
+    if (code === 'auth/popup-closed-by-user') return 'Popup Google chiuso prima del completamento.';
+    if (code === 'auth/popup-blocked') return 'Popup Google bloccato dal browser.';
+    if (code === 'auth/operation-not-supported-in-this-environment') {
+        return 'Ambiente non supporta popup (tipico in PWA/iOS). Usa browser normale o flusso redirect.';
     }
-
-    try {
-        await fb.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
-        const provider = new firebase.auth.GoogleAuthProvider();
-        provider.setCustomParameters({ prompt: 'select_account' });
-        await user.linkWithPopup(provider);
-        await user.reload().catch(() => {});
-        const refreshedUser = fb.auth.currentUser || user;
-        updateDashboardGoogleLinkButton(refreshedUser);
-        setDashboardAuthStatus('Account collegato a Google con successo.', true);
-        showDashboardToast('Google collegato al tuo account MatchMap.', 'ok');
-    } catch (error) {
-        const code = String(error?.code || '').trim();
-        let message = String(error?.message || 'Impossibile collegare Google.');
-        if (code === 'auth/provider-already-linked') {
-            message = 'Google e gia collegato a questo account.';
-        } else if (code === 'auth/credential-already-in-use') {
-            message = 'Questo account Google e gia associato a un altro utente MatchMap.';
-        } else if (code === 'auth/requires-recent-login') {
-            message = 'Per sicurezza rifai login e riprova il collegamento Google.';
-        } else if (code === 'auth/popup-closed-by-user') {
-            message = 'Popup Google chiuso prima del completamento.';
+    if (code === 'auth/unauthorized-domain') {
+        return 'Dominio non autorizzato su Firebase Auth. Aggiungi dominio in Firebase Console > Authentication > Settings > Authorized domains.';
+    }
+    if (code === 'auth/operation-not-allowed') {
+        if (context === 'google-login' || context === 'google-link') {
+            return 'Provider Google disattivato su Firebase Console > Authentication > Sign-in method.';
         }
-        setDashboardAuthStatus(`Collegamento Google fallito: ${message}`);
+        return 'Provider Email/Password disattivato su Firebase Console > Authentication > Sign-in method.';
     }
+    return base;
 }
 
 async function logoutDashboardUser() {
@@ -2936,6 +3142,10 @@ function initDashboardAuth() {
     }
 
     fb.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(() => {});
+    fb.auth.getRedirectResult().catch(error => {
+        const msg = describeFirebaseAuthError(error, 'google-login');
+        setDashboardAuthStatus(`Login Google fallito: ${msg}`);
+    });
     fb.auth.onAuthStateChanged(async user => {
         setDashboardAuthButtonsVisibility(user);
         if (!user) {
@@ -3286,6 +3496,28 @@ if (authProfileSummaryImg) {
         authProfileSummaryImg.removeAttribute('src');
     });
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
