@@ -26,7 +26,8 @@ const AUTO_FIELD_SUGGESTIONS_CACHE_KEY = 'matchmap_auto_field_suggestions_v1';
 const DASHBOARD_AUTH_SNAPSHOT_KEY = 'matchmap_dashboard_auth_snapshot_v1';
 const GMAIL_INTEGRATION_STORAGE_KEY = 'matchmap_gmail_integration_v1';
 const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
-const GMAIL_DEFAULT_QUERY = 'from:(noreply OR no-reply OR designazioni) (sinfonia OR designazione OR aia) newer_than:180d';
+const GMAIL_DEFAULT_QUERY = 'from:(noreply OR no-reply OR designazioni OR aia) (sinfonia OR designazione OR "sei designato" OR "gara n.") newer_than:365d';
+const GMAIL_FALLBACK_QUERY = '("notifica di designazione" OR designazione OR rimborso OR "rimborso totale" OR "gara :" OR "numero gara") newer_than:365d';
 
 async function loadLuoghiDb() {
     try {
@@ -391,6 +392,24 @@ function getMapsUrl(evento) {
     const match = findLuogoDbMatch(evento.locationText);
     if (match?.mapsUrl) {
         return match.mapsUrl;
+    }
+
+    const fallbackExisting = findExistingLuogoForEvento(evento);
+    if (fallbackExisting?.mapsUrl) {
+        return fallbackExisting.mapsUrl;
+    }
+
+    const primaryTeam = normalizeText(getPrimaryTeamName(evento?.squadre || ''));
+    if (primaryTeam) {
+        const byTeam = luoghiDb.find(item => {
+            const team = normalizeText(item?.team || item?.squadra || '');
+            const nome = normalizeText(item?.nome || '');
+            return (team && (team.includes(primaryTeam) || primaryTeam.includes(team)))
+                || (nome && nome.includes(primaryTeam));
+        });
+        if (byTeam?.mapsUrl) {
+            return byTeam.mapsUrl;
+        }
     }
 
     const query = evento.locationText || evento.luogo || evento.impianto || 'campo sportivo';
@@ -866,6 +885,28 @@ function ensureEventoShape(evento, fallbackTimestamp = 0) {
     return item;
 }
 
+function extractSquadreFromSubject(subject) {
+    const raw = String(subject || '').trim();
+    if (!raw) {
+        return '';
+    }
+    const cleaned = raw
+        .replace(/^\[[^\]]+\]\s*/i, '')
+        .replace(/^designazione\s+del\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s*:\s*/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const m = cleaned.match(/^(.+?)\s*-\s*(.+)$/);
+    if (!m) {
+        return '';
+    }
+    const a = String(m[1] || '').trim();
+    const b = String(m[2] || '').trim();
+    if (!a || !b) {
+        return '';
+    }
+    return `${a} - ${b}`;
+}
+
 function buildPreviewEventoFromMessage(message) {
     const payload = message?.payload || {};
     const subject = extractHeaderValue(payload.headers, 'Subject');
@@ -880,8 +921,23 @@ function buildPreviewEventoFromMessage(message) {
         emailDateHeader: dateHeader,
         emailInternalTimestamp: Number(message?.internalDate || 0)
     });
-    const evento = ensureEventoShape({
+    const parsedFromMeta = parseDesignazione(sourceMetaText, {
+        emailDateHeader: dateHeader,
+        emailInternalTimestamp: Number(message?.internalDate || 0)
+    });
+
+    const mergedParsed = {
         ...parsedFromBody,
+        luogo: parsedFromBody.luogo || parsedFromMeta.luogo || '',
+        impianto: parsedFromBody.impianto || parsedFromMeta.impianto || '',
+        indirizzo: parsedFromBody.indirizzo || parsedFromMeta.indirizzo || '',
+        locationText: parsedFromBody.locationText || parsedFromMeta.locationText || '',
+        designazioneS4yRaw: parsedFromBody.designazioneS4yRaw || parsedFromMeta.designazioneS4yRaw || '',
+        squadre: parsedFromBody.squadre || parsedFromMeta.squadre || ''
+    };
+
+    const evento = ensureEventoShape({
+        ...mergedParsed,
         _gmailMessageId: String(message?.id || ''),
         _gmailThreadId: String(message?.threadId || ''),
         _gmailSubject: subject,
@@ -890,26 +946,45 @@ function buildPreviewEventoFromMessage(message) {
         _gmailSnippet: snippet
     }, Number(message?.internalDate || 0));
 
-    const hasActivityArbitro = /\battivit[àa]\s*:\s*arbitro\b/i.test(sourceText);
-    const hasCategoria = /\bcategoria\s*:/i.test(sourceText);
-    const hasData = /\bdata\s*:/i.test(sourceText);
-    const hasOra = /\bora\s*:/i.test(sourceText);
-    const hasCampo = /\bcampo\s*:/i.test(sourceText);
-    const hasKm = /\bdistanza\s*\(\s*km\s*\)\s*:/i.test(sourceText);
-    const hasRimborsoLabel = /\brimborso\s+totale\s*\(\s*€\s*\)\s*:/i.test(sourceText);
+    if (!evento.squadre) {
+        evento.squadre = extractSquadreFromSubject(subject);
+    }
+
+    if (!evento.locationText) {
+        const extraCampo = sourceMetaText.match(/\bcampo\s*:\s*([^\r\n]+)/i)?.[1]?.trim() || '';
+        const extraIndirizzo = sourceMetaText.match(/\bindirizzo\s*:\s*([^\r\n]+)/i)?.[1]?.trim() || '';
+        const extraLocalita = sourceMetaText.match(/\blocalit[àa]\s*:\s*([^\r\n]+)/i)?.[1]?.trim() || '';
+        evento.impianto = evento.impianto || extraCampo;
+        evento.indirizzo = evento.indirizzo || extraIndirizzo;
+        evento.luogo = evento.luogo || extraLocalita;
+        evento.locationText = [evento.luogo, evento.impianto, evento.indirizzo].filter(Boolean).join(', ').trim();
+    }
+
+    const hasActivityArbitro = /\battivit[àa]\s*:\s*arbitro\b/i.test(sourceText) || /\bsei\s+designato\b/i.test(sourceText);
+    const hasCategoria = /\bcategoria\s*:/i.test(sourceText) || /\bgara\s*n\.?\s*\d+\s+di\s+.+?\s+girone\b/i.test(sourceText);
+    const hasData = /\bdata\s*:/i.test(sourceText) || /\bla\s+partita\s+si\s+disputer[aà]\b/i.test(sourceText);
+    const hasOra = /\bora\s*:/i.test(sourceText) || /\balle\s+ore\s+([01]?\d|2[0-3])[:.]([0-5]\d)\b/i.test(sourceText);
+    const hasCampo = /\bcampo\s*:/i.test(sourceText) || /\bsull['’]impianto\b/i.test(sourceText);
+    const hasKm = /\bdistanza\s*\(\s*km\s*\)\s*:/i.test(sourceText) || /\(\s*\d+\s*km\s*\)/i.test(sourceText);
+    const hasRimborsoLabel = /\brimborso\s+totale\s*\(\s*€\s*\)\s*:/i.test(sourceText) || /\brimborso\s*:\s*\d+(?:[\.,]\d{1,2})?\s*€/i.test(sourceText);
     const hasRimborsoPositive = Number(evento.rimborso || 0) > 0;
+    const hasCoreImportData = Boolean(
+        evento.data &&
+        evento.ora &&
+        evento.categoria &&
+        hasRimborsoPositive
+    );
+
     const valid = Boolean(
         hasActivityArbitro &&
         hasCategoria &&
         hasData &&
         hasOra &&
         hasCampo &&
-        hasKm &&
+        (hasKm || Number(evento.km || 0) > 0) &&
         hasRimborsoLabel &&
         hasRimborsoPositive &&
-        evento.data &&
-        evento.ora &&
-        evento.categoria
+        hasCoreImportData
     );
     return {
         id: String(message?.id || ''),
@@ -923,6 +998,94 @@ function buildPreviewEventoFromMessage(message) {
         },
         evento
     };
+}
+
+function isLikelyDesignazioneEmail(item) {
+    const meta = item?.messageMeta || {};
+    const evento = item?.evento || {};
+    const hay = normalizeText(`${meta.subject || ''} ${meta.from || ''} ${meta.snippet || ''}`);
+    const hasDesignazioneWords = /designazione|sinfonia|aia|gara n|sei designato/.test(hay);
+    const hasCoreParsedFields = Boolean(evento?.data && evento?.ora && evento?.squadre);
+    return hasDesignazioneWords || hasCoreParsedFields;
+}
+
+function splitMatchTeams(squadreText) {
+    const raw = String(squadreText || '').trim();
+    if (!raw) {
+        return ['', ''];
+    }
+    const parts = raw.split(/\s*-\s*/).map(x => x.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+        return [parts[0], parts[1]];
+    }
+    return [raw, ''];
+}
+
+function extractLogoCandidateFromLuogo(entry) {
+    const raw = entry?.loghiUrl ?? entry?.logoUrl ?? entry?.logo ?? '';
+    const explicitRaw = Array.isArray(raw) ? raw.join(',') : String(raw || '');
+    const explicitFirst = explicitRaw
+        .split(/[,;\n]+/)
+        .map(x => x.trim())
+        .find(Boolean);
+    if (!explicitFirst) {
+        return '';
+    }
+    const tuttocampoCandidates = buildTuttocampoLogoCandidates(explicitFirst);
+    return tuttocampoCandidates[0] || explicitFirst;
+}
+
+function findBestLogoEntryForTeam(teamName) {
+    const norm = normalizeText(teamName);
+    if (!norm) {
+        return null;
+    }
+    const queryTokens = norm.split(' ').filter(token => token.length >= 3);
+    let best = null;
+    let bestScore = 0;
+
+    luoghiDb.forEach(item => {
+        const team = normalizeText(item?.team || item?.squadra || item?.nome || '');
+        if (!team) {
+            return;
+        }
+        let score = 0;
+        if (team === norm) {
+            score += 200;
+        }
+        if (team.includes(norm) || norm.includes(team)) {
+            score += 120;
+        }
+        const teamTokens = team.split(' ').filter(token => token.length >= 3);
+        queryTokens.forEach(token => {
+            if (teamTokens.includes(token)) {
+                score += 20;
+            }
+        });
+        const hasLogo = Boolean(extractLogoCandidateFromLuogo(item));
+        if (hasLogo) {
+            score += 15;
+        }
+        if (score > bestScore) {
+            bestScore = score;
+            best = item;
+        }
+    });
+
+    return bestScore >= 35 ? best : null;
+}
+
+function getTeamLogoForPreview(teamName) {
+    const name = String(teamName || '').trim();
+    if (!name) {
+        return TEAM_LOGO_FALLBACK_PATH;
+    }
+    const fromDb = findBestLogoEntryForTeam(name);
+    const dbLogo = extractLogoCandidateFromLuogo(fromDb);
+    if (dbLogo) {
+        return dbLogo;
+    }
+    return `img/teams/${toTeamLogoSlug(name)}.png`;
 }
 
 function renderGmailPreviewList() {
@@ -942,12 +1105,17 @@ function renderGmailPreviewList() {
     previewWrap.hidden = false;
     const validCount = gmailPreviewItems.filter(item => item.valid).length;
     const selectedCount = gmailPreviewItems.filter(item => item.valid && item.selected).length;
+
     gmailSelectAllState = Boolean(validCount && selectedCount === validCount);
 
     previewList.innerHTML = gmailPreviewItems.map((item, index) => {
         const evento = item.evento || {};
-        const meta = item.messageMeta || {};
-        const summary = [evento.data, evento.ora, evento.squadre].filter(Boolean).join(' - ');
+        const [teamA, teamB] = splitMatchTeams(evento.squadre || '');
+        const logoA = getTeamLogoForPreview(teamA);
+        const logoB = getTeamLogoForPreview(teamB);
+        const kmText = Number(evento.km || 0) > 0 ? `${Number(evento.km || 0)} km` : 'km n/d';
+        const rimborsoText = `${Number(evento.rimborso || 0)} €`;
+        const dateTime = [evento.data, evento.ora].filter(Boolean).join(' · ');
         const validityClass = item.valid ? 'is-valid' : 'is-invalid';
         const validityLabel = item.valid ? 'Estrazione ok' : 'Non riconosciuta (controlla manualmente)';
         const checked = item.selected ? 'checked' : '';
@@ -958,11 +1126,25 @@ function renderGmailPreviewList() {
                     <input type="checkbox" data-gmail-preview-index="${index}" ${checked} ${disabled}>
                     <span>${escapeHtml(validityLabel)}</span>
                 </label>
-                <p><strong>Email:</strong> ${escapeHtml(meta.subject || '(senza oggetto)')}</p>
-                <p><strong>Da:</strong> ${escapeHtml(meta.from || '-')}</p>
-                <p><strong>Data email:</strong> ${escapeHtml(meta.date || '-')}</p>
-                <p><strong>Partita:</strong> ${escapeHtml(summary || 'Dati insufficienti')}</p>
-                <p><strong>Categoria:</strong> ${escapeHtml(evento.categoria || '-')} | <strong>Rimborso:</strong> ${escapeHtml(String(evento.rimborso || 0))} €</p>
+                <div class="gmail-match-card">
+                    <div class="gmail-match-teams">
+                        <div class="gmail-team-chip">
+                            <img src="${escapeHtml(logoA)}" alt="Logo ${escapeHtml(teamA || 'Squadra')}" loading="lazy" decoding="async" onerror="this.src='${TEAM_LOGO_FALLBACK_PATH}'">
+                            <span>${escapeHtml(teamA || 'Squadra A')}</span>
+                        </div>
+                        <div class="gmail-vs">VS</div>
+                        <div class="gmail-team-chip">
+                            <img src="${escapeHtml(logoB)}" alt="Logo ${escapeHtml(teamB || 'Squadra')}" loading="lazy" decoding="async" onerror="this.src='${TEAM_LOGO_FALLBACK_PATH}'">
+                            <span>${escapeHtml(teamB || 'Squadra B')}</span>
+                        </div>
+                    </div>
+                    <div class="gmail-match-meta">${escapeHtml(dateTime || 'Data/Ora n/d')}</div>
+                    <div class="gmail-match-badges">
+                        <span class="gmail-badge">${escapeHtml(evento.categoria || 'Categoria n/d')}</span>
+                        <span class="gmail-badge">${escapeHtml(kmText)}</span>
+                        <span class="gmail-badge gmail-badge-money">${escapeHtml(rimborsoText)}</span>
+                    </div>
+                </div>
             </article>
         `;
     }).join('');
@@ -1145,9 +1327,18 @@ async function loadRelevantGmailMessages() {
 
     try {
         setGmailStatus('Ricerca email rilevanti in corso...');
-        const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=20&includeSpamTrash=false&q=${encodeURIComponent(query)}`;
-        const listData = await gmailApiFetchJson(listUrl);
-        const messages = Array.isArray(listData?.messages) ? listData.messages : [];
+        const fetchMessageRefs = async rawQuery => {
+            const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=60&includeSpamTrash=false&q=${encodeURIComponent(rawQuery)}`;
+            const listData = await gmailApiFetchJson(listUrl);
+            return Array.isArray(listData?.messages) ? listData.messages : [];
+        };
+
+        let messages = await fetchMessageRefs(query);
+        let usedFallback = false;
+        if (!messages.length) {
+            messages = await fetchMessageRefs(GMAIL_FALLBACK_QUERY);
+            usedFallback = true;
+        }
         if (!messages.length) {
             clearGmailPreview();
             setGmailStatus('Nessuna email rilevante trovata con questo filtro.');
@@ -1167,14 +1358,54 @@ async function loadRelevantGmailMessages() {
             }
         }));
 
-        gmailPreviewItems = fullMessages
+        const parsedItems = fullMessages
             .filter(Boolean)
             .map(buildPreviewEventoFromMessage)
-            .filter(item => item?.id && item.valid);
+            .filter(item => item?.id);
+
+        let likelyItems = parsedItems.filter(isLikelyDesignazioneEmail);
+
+        // Se la query utente era troppo stretta, prova un secondo tentativo automatico
+        // con query fallback prima di mostrare lista vuota/poco utile.
+        if (!likelyItems.length && !usedFallback) {
+            const fallbackRefs = await fetchMessageRefs(GMAIL_FALLBACK_QUERY);
+            if (fallbackRefs.length) {
+                const fallbackFull = await Promise.all(fallbackRefs.map(async msg => {
+                    const id = String(msg?.id || '').trim();
+                    if (!id) return null;
+                    try {
+                        const detailUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=full`;
+                        return await gmailApiFetchJson(detailUrl);
+                    } catch {
+                        return null;
+                    }
+                }));
+                const fallbackParsed = fallbackFull
+                    .filter(Boolean)
+                    .map(buildPreviewEventoFromMessage)
+                    .filter(item => item?.id);
+                const fallbackLikely = fallbackParsed.filter(isLikelyDesignazioneEmail);
+                if (fallbackLikely.length) {
+                    likelyItems = fallbackLikely;
+                    usedFallback = true;
+                }
+            }
+        }
+
+        // Mostra solo email realmente pertinenti a designazioni.
+        // Le altre devono restare invisibili in preview.
+        gmailPreviewItems = likelyItems;
+
+        if (!gmailPreviewItems.length) {
+            clearGmailPreview();
+            setGmailStatus('Nessuna email di designazione trovata con questo filtro.');
+            return;
+        }
 
         renderGmailPreviewList();
         const validCount = gmailPreviewItems.filter(item => item.valid).length;
-        setGmailStatus(`Email lette: ${gmailPreviewItems.length}. Partite riconosciute: ${validCount}.`, true);
+        const sourceLabel = usedFallback ? ' (query fallback automatica)' : '';
+        setGmailStatus(`Email lette: ${gmailPreviewItems.length}. Partite riconosciute: ${validCount}.${sourceLabel}`, true);
     } catch (error) {
         setGmailStatus(`Import Gmail fallito: ${error.message}`);
     }
@@ -1313,13 +1544,17 @@ function parseDesignazione(testo, options = {}) {
     const impiantoRegex = /sull['’]impianto\s+(.+?)\s+sito in/i;
     const indirizzoRegex = /sito in\s+([^\r\n]+)/i;
     const squadreRegex = /tra\s*[:\-]?\s*([^\r\n]+)/i;
+    const squadreBlockRegex = /\btra\b\s*([\s\S]{0,220}?)\b(?:La\s+partita\s+si\s+disputer[aà]|Rimborso|Data|Ora|Campo|Indirizzo|$)/i;
     const squadreVsRegex = /\b([A-Z0-9][A-Z0-9\s'.-]{2,}?)\s*(?:-|–|—|vs\.?|v\.?s\.?|contro)\s*([A-Z0-9][A-Z0-9\s'.-]{2,})\b/i;
     const categoriaRegex = /\bcategoria\s*:\s*([^\r\n]+)/i;
+    const categoriaInlineRegex = /\bgara\s*n\.?\s*\d+\s+di\s+(.+?)\s+girone\b/i;
     const garaNumeroRegex = /\b(?:numero\s+gara|gara\s*n\.?)\s*[:\-]?\s*(\d+)/i;
     const gironeRegex = /girone\s+([A-Z0-9]+)/i;
     const arbitroRegex = /^([A-Z\s'`]+),\s*sei designato/i;
     const rimborsoRegex = /\brimborso\s+totale\s*\(\s*€\s*\)\s*:\s*(\d+(?:[\.,]\d{1,2})?)/i;
+    const rimborsoInlineRegex = /\brimborso\s*:\s*(\d+(?:[\.,]\d{1,2})?)\s*€/i;
     const kmRegex = /\bdistanza\s*\(\s*km\s*\)\s*:\s*(\d+)/i;
+    const kmInlineRegex = /\(\s*(\d+)\s*km\s*\)/i;
     const designazioneS4yRegex = /a\s+(.+?)\s+sull['’]impianto\s+(.+?)\s+sito in\s+([^\r\n]+)/i;
 
     const luogo = testo.match(luogoRegex)?.[1]?.trim() || '';
@@ -1371,7 +1606,7 @@ function parseDesignazione(testo, options = {}) {
         const cleaned = String(raw || '').replace(/\s+/g, ' ').trim();
         if (!cleaned) return '';
         const parts = cleaned
-            .split(/\s*(?:-|–|—|vs\.?|v\.?s\.?)\s*/i)
+            .split(/\s*(?:-|–|—|vs\.?|v\.?s\.?|\/|\|)\s*/i)
             .map(x => x.trim())
             .filter(Boolean);
         if (parts.length < 2) return '';
@@ -1393,7 +1628,19 @@ function parseDesignazione(testo, options = {}) {
         return `${a} - ${b}`;
     })();
 
-    const squadreMain = squadreFromGaraDirect || normalizeTeamsPair(garaLineClean) || normalizeTeamsPair(garaFromTable) || normalizeTeamsPair(testo.match(squadreRegex)?.[1]?.trim() || '') || '';
+    const squadreFromTraBlock = (() => {
+        const block = String(testo.match(squadreBlockRegex)?.[1] || '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        return normalizeTeamsPair(block);
+    })();
+
+    const squadreMain = squadreFromGaraDirect
+        || normalizeTeamsPair(garaLineClean)
+        || normalizeTeamsPair(garaFromTable)
+        || squadreFromTraBlock
+        || normalizeTeamsPair(testo.match(squadreRegex)?.[1]?.trim() || '')
+        || '';
     const squadreVs = testo.match(squadreVsRegex);
     let squadreValue = squadreMain || (squadreVs ? `${squadreVs[1].trim()} - ${squadreVs[2].trim()}` : '');
 
@@ -1428,10 +1675,30 @@ function parseDesignazione(testo, options = {}) {
             .trim();
     }
 
-    // ultimo guardrail: ritorna SOLO "SQUADRA A - SQUADRA B"
-    squadreValue = normalizeTeamsPair(squadreValue);
+    // ultimo guardrail: preferisci formato "SQUADRA A - SQUADRA B"
+    // ma non scartare completamente designazioni manuali valide
+    const strictPair = normalizeTeamsPair(squadreValue);
+    if (strictPair) {
+        squadreValue = strictPair;
+    } else {
+        const garaOnlyRaw = String(testo || '').match(/\bGara\s*:\s*([^\r\n]+)/i)?.[1] || '';
+        const garaOnlyClean = String(garaOnlyRaw)
+            .replace(/\b(?:Data|Ora|Campo|Indirizzo|Localit[àa]|Provincia|Distanza\s*\(\s*km\s*\)|Rimborso\s+Totale\s*\(\s*€\s*\)|Accedi\s+a\s+Sinfonia4You|EMAIL\s+GENERATA\s+AUTOMATICAMENTE)\b[\s\S]*$/i, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const garaPair = normalizeTeamsPair(garaOnlyClean);
+        if (garaPair) {
+            squadreValue = garaPair;
+        } else if (squadreFromTraBlock) {
+            squadreValue = squadreFromTraBlock;
+        } else if (garaOnlyClean && !/[:]|attivit|categoria|girone|giornata|numero\s+gara|data|ora|campo|indirizzo|localit|provincia|distanza|rimborso/i.test(garaOnlyClean)) {
+            squadreValue = garaOnlyClean;
+        } else {
+            squadreValue = '';
+        }
+    }
 
-    const rimborsoRaw = testo.match(rimborsoRegex)?.[1] || '0';
+    const rimborsoRaw = testo.match(rimborsoRegex)?.[1] || testo.match(rimborsoInlineRegex)?.[1] || '0';
     const rimborsoValue = Number(String(rimborsoRaw).replace(',', '.')) || 0;
 
     const emailYearFromHeader = (() => {
@@ -1481,12 +1748,12 @@ function parseDesignazione(testo, options = {}) {
         designazioneS4yRaw,
         locationText,
         squadre: squadreValue,
-        categoria: categoriaFromTable || testo.match(categoriaRegex)?.[1]?.trim() || '',
+        categoria: categoriaFromTable || testo.match(categoriaRegex)?.[1]?.trim() || testo.match(categoriaInlineRegex)?.[1]?.trim() || '',
         garaNumero: testo.match(garaNumeroRegex)?.[1]?.trim() || '',
         girone: testo.match(gironeRegex)?.[1]?.trim() || '',
         arbitro: testo.match(arbitroRegex)?.[1]?.trim() || '',
         rimborso: rimborsoValue,
-        km: Number(testo.match(kmRegex)?.[1] || 0)
+        km: Number(testo.match(kmRegex)?.[1] || testo.match(kmInlineRegex)?.[1] || 0)
     };
 }
 
@@ -2214,39 +2481,59 @@ function buildDashboardEventRow(item) {
     const mapsUrl = getMapsUrl(evento);
     const calendarText = `${evento.categoria}: ${evento.squadre}`;
     const calendarDetails = buildCalendarDescription(evento);
+    const [teamA, teamB] = splitMatchTeams(evento.squadre || '');
+    const logoA = getTeamLogoForPreview(teamA);
+    const logoB = getTeamLogoForPreview(teamB);
+    const kmText = Number(evento.km || 0) > 0 ? `${Number(evento.km || 0)} km` : 'km n/d';
+    const rimborsoText = `${Number(evento.rimborso || 0)} €`;
+    const dateTime = [evento.data, evento.ora].filter(Boolean).join(' · ');
     const row = document.createElement('tr');
     row.classList.add(evento.pagata ? 'event-paid-row' : 'event-unpaid-row');
     row.innerHTML = `
-            <td>${evento.data}</td>
-            <td>${evento.ora}</td>
-            <td>${evento.squadre}</td>
-            <td>${evento.categoria}</td>
-            <td>${evento.rimborso} \u20AC</td>
-            <td>
-                <a class="icon-link maps-link" target="_blank" rel="noopener noreferrer" href="${mapsUrl}" title="Apri su Google Maps" aria-label="Apri su Google Maps">
-                    <img src="img/maps.png" alt="Google Maps">
-                </a>
-            </td>
-            <td>
-                <a class="icon-link calendar-link" target="_blank" rel="noopener noreferrer" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(calendarText)}&dates=${formatDataGoogle(evento.data, evento.ora)}&details=${encodeURIComponent(calendarDetails)}&location=${encodeURIComponent(evento.locationText)}" title="Aggiungi a Google Calendar" aria-label="Aggiungi a Google Calendar">
-                    <img src="img/calendar.svg" alt="Google Calendar">
-                </a>
-            </td>
-            <td>
-                <button type="button" class="event-paid-btn ${evento.pagata ? 'is-paid' : ''}" onclick="toggleDashboardEventPaid(${item.index})" aria-label="${evento.pagata ? 'Segna non pagata' : 'Segna pagata'}" title="${evento.pagata ? 'Segna non pagata' : 'Segna pagata'}">
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                        <path d="M20 6L9 17l-5-5"></path>
-                    </svg>
-                </button>
-                <button type="button" class="event-remove-btn" onclick="removeDashboardEvent(${item.index})" aria-label="Elimina evento" title="Elimina evento">
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                        <path d="M3 6h18"></path>
-                        <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path>
-                        <path d="M19 6l-1 14a1 1 0 0 1-1 .93H7a1 1 0 0 1-1-.93L5 6"></path>
-                        <path d="M10 11v6"></path>
-                        <path d="M14 11v6"></path>
-                    </svg>
-                </button>
+            <td colspan="8" class="event-card-cell">
+                <article class="gmail-preview-item dashboard-preview-item ${evento.pagata ? 'is-valid' : 'is-invalid'}">
+                    <div class="gmail-match-card">
+                        <div class="gmail-match-teams">
+                            <div class="gmail-team-chip">
+                                <img src="${escapeHtml(logoA)}" alt="Logo ${escapeHtml(teamA || 'Squadra')}" loading="lazy" decoding="async" onerror="this.src='${TEAM_LOGO_FALLBACK_PATH}'">
+                                <span>${escapeHtml(teamA || 'Squadra A')}</span>
+                            </div>
+                            <div class="gmail-vs">VS</div>
+                            <div class="gmail-team-chip">
+                                <img src="${escapeHtml(logoB)}" alt="Logo ${escapeHtml(teamB || 'Squadra')}" loading="lazy" decoding="async" onerror="this.src='${TEAM_LOGO_FALLBACK_PATH}'">
+                                <span>${escapeHtml(teamB || 'Squadra B')}</span>
+                            </div>
+                        </div>
+                        <div class="gmail-match-meta">${escapeHtml(dateTime || 'Data/Ora n/d')}</div>
+                        <div class="gmail-match-badges">
+                            <span class="gmail-badge">${escapeHtml(evento.categoria || 'Categoria n/d')}</span>
+                            <span class="gmail-badge">${escapeHtml(kmText)}</span>
+                            <span class="gmail-badge gmail-badge-money">${escapeHtml(rimborsoText)}</span>
+                        </div>
+                        <div class="dashboard-card-actions">
+                            <a class="icon-link maps-link" target="_blank" rel="noopener noreferrer" href="${mapsUrl}" title="Apri su Google Maps" aria-label="Apri su Google Maps">
+                                <img src="img/maps.png" alt="Google Maps">
+                            </a>
+                            <a class="icon-link calendar-link" target="_blank" rel="noopener noreferrer" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(calendarText)}&dates=${formatDataGoogle(evento.data, evento.ora)}&details=${encodeURIComponent(calendarDetails)}&location=${encodeURIComponent(evento.locationText)}" title="Aggiungi a Google Calendar" aria-label="Aggiungi a Google Calendar">
+                                <img src="img/calendar.svg" alt="Google Calendar">
+                            </a>
+                            <button type="button" class="event-paid-btn ${evento.pagata ? 'is-paid' : ''}" onclick="toggleDashboardEventPaid(${item.index})" aria-label="${evento.pagata ? 'Segna non pagata' : 'Segna pagata'}" title="${evento.pagata ? 'Segna non pagata' : 'Segna pagata'}">
+                                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path d="M20 6L9 17l-5-5"></path>
+                                </svg>
+                            </button>
+                            <button type="button" class="event-remove-btn" onclick="removeDashboardEvent(${item.index})" aria-label="Elimina evento" title="Elimina evento">
+                                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                    <path d="M3 6h18"></path>
+                                    <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path>
+                                    <path d="M19 6l-1 14a1 1 0 0 1-1 .93H7a1 1 0 0 1-1-.93L5 6"></path>
+                                    <path d="M10 11v6"></path>
+                                    <path d="M14 11v6"></path>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </article>
             </td>
         `;
     return row;
@@ -3496,6 +3783,22 @@ if (authProfileSummaryImg) {
         authProfileSummaryImg.removeAttribute('src');
     });
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

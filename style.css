@@ -975,6 +975,28 @@ a:hover {
     background: transparent;
 }
 
+#eventTable td.event-card-cell {
+    padding: 8px 0;
+    border-bottom: 0;
+}
+
+#eventTable td.event-card-cell::before {
+    content: none !important;
+}
+
+.dashboard-preview-item {
+    margin: 0;
+}
+
+.dashboard-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    align-items: center;
+    margin-top: 2px;
+}
+
 #eventTable th:nth-child(8),
 #eventTable td:nth-child(8) {
     min-width: 96px;
@@ -983,6 +1005,10 @@ a:hover {
 
 #eventTable td:nth-child(8) {
     text-align: right;
+}
+
+#eventTable thead {
+    display: none;
 }
 
 .icon-link {
@@ -1157,6 +1183,117 @@ a:hover {
     font-size: 0.78rem;
     line-height: 1.25;
     color: #9fb2dd;
+}
+
+/* Gmail preview: compact match cards */
+.gmail-preview-list {
+    display: grid;
+    gap: 10px;
+}
+
+.gmail-preview-item {
+    border: 1px solid rgba(159, 178, 221, 0.22);
+    border-radius: 14px;
+    background: rgba(9, 18, 37, 0.58);
+    padding: 10px;
+    display: grid;
+    gap: 8px;
+}
+
+.gmail-preview-item.is-valid {
+    border-color: rgba(110, 231, 183, 0.45);
+}
+
+.gmail-preview-item.is-invalid {
+    border-color: rgba(251, 191, 36, 0.45);
+}
+
+.gmail-preview-item p {
+    display: none;
+}
+
+.gmail-preview-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: #b9c9ee;
+}
+
+.gmail-preview-check input {
+    width: 16px;
+    height: 16px;
+}
+
+.gmail-match-card {
+    display: grid;
+    gap: 8px;
+}
+
+.gmail-match-teams {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 8px;
+    align-items: center;
+}
+
+.gmail-team-chip {
+    min-width: 0;
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+    text-align: center;
+}
+
+.gmail-team-chip img {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    object-fit: cover;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(159, 178, 221, 0.32);
+}
+
+.gmail-team-chip span {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #e8edff;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.gmail-vs {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #9fdcff;
+    letter-spacing: 0.08em;
+}
+
+.gmail-match-meta {
+    font-size: 0.77rem;
+    color: #9fb2dd;
+    text-align: center;
+}
+
+.gmail-match-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: center;
+}
+
+.gmail-badge {
+    border: 1px solid rgba(159, 178, 221, 0.3);
+    border-radius: 999px;
+    padding: 3px 9px;
+    font-size: 0.74rem;
+    color: #dce7ff;
+    background: rgba(9, 18, 37, 0.8);
+}
+
+.gmail-badge-money {
+    border-color: rgba(110, 231, 183, 0.45);
+    color: #baf5df;
 }
 
 .leaflet-marker-icon.team-logo-marker {
