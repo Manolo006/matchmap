@@ -1159,14 +1159,67 @@ function findBestLogoEntryForTeam(teamName) {
 function getTeamLogoForPreview(teamName) {
     const name = String(teamName || '').trim();
     if (!name) {
-        return TEAM_LOGO_FALLBACK_PATH;
+        return '';
     }
     const fromDb = findBestLogoEntryForTeam(name);
     const dbLogo = extractLogoCandidateFromLuogo(fromDb);
     if (dbLogo) {
         return dbLogo;
     }
-    return `img/teams/${toTeamLogoSlug(name)}.png`;
+    return '';
+}
+
+function renderTeamAvatar(teamName, logoUrl) {
+    const name = String(teamName || '').trim();
+    const words = name
+        .replace(/[^a-zA-Z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w.length > 0 && !/^(di|del|della|dei|degli|da|in|con|su|per|tra|fra|a|e|ed|c|fc|as|ss|usd|asd|cr|ac|calcio|football|club)$/i.test(w));
+
+    let initials = '';
+    if (words.length >= 2) {
+        initials = (words[0][0] + words[1][0]).toUpperCase();
+    } else if (words.length === 1) {
+        initials = words[0].slice(0, 2).toUpperCase();
+    } else {
+        const fallbackWord = name.replace(/[^a-zA-Z0-9]/g, '');
+        initials = (fallbackWord.slice(0, 2) || 'SQ').toUpperCase();
+    }
+
+    const gradients = [
+        'linear-gradient(135deg, #1e3a8a, #3b82f6)',
+        'linear-gradient(135deg, #065f46, #10b981)',
+        'linear-gradient(135deg, #7c2d12, #f97316)',
+        'linear-gradient(135deg, #581c87, #a855f7)',
+        'linear-gradient(135deg, #831843, #ec4899)',
+        'linear-gradient(135deg, #164e63, #06b6d4)',
+        'linear-gradient(135deg, #312e81, #6366f1)',
+        'linear-gradient(135deg, #713f12, #eab308)'
+    ];
+    let hash = 0;
+    for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) % gradients.length;
+    const bgGradient = gradients[Math.abs(hash) % gradients.length];
+
+    const hasRealLogo = Boolean(logoUrl && !logoUrl.includes('img/logo.png') && !logoUrl.startsWith('img/teams/'));
+
+    if (hasRealLogo) {
+        return `
+            <div class="team-avatar-box">
+                <img src="${escapeHtml(logoUrl)}" alt="Logo ${escapeHtml(name)}" class="team-avatar-img" loading="lazy" decoding="async" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                <div class="team-avatar-fallback" style="display:none; background: ${bgGradient};">
+                    <span>${escapeHtml(initials)}</span>
+                </div>
+            </div>
+        `;
+    }
+
+    return `
+        <div class="team-avatar-box">
+            <div class="team-avatar-fallback" style="background: ${bgGradient};">
+                <span>${escapeHtml(initials)}</span>
+            </div>
+        </div>
+    `;
 }
 
 function renderGmailPreviewList() {
@@ -1210,12 +1263,12 @@ function renderGmailPreviewList() {
                 <div class="gmail-match-card">
                     <div class="gmail-match-teams">
                         <div class="gmail-team-chip">
-                            <img src="${escapeHtml(logoA)}" alt="Logo ${escapeHtml(teamA || 'Squadra')}" loading="lazy" decoding="async" onerror="this.src='${TEAM_LOGO_FALLBACK_PATH}'">
+                            ${renderTeamAvatar(teamA, logoA)}
                             <span>${escapeHtml(teamA || 'Squadra A')}</span>
                         </div>
                         <div class="gmail-vs">VS</div>
                         <div class="gmail-team-chip">
-                            <img src="${escapeHtml(logoB)}" alt="Logo ${escapeHtml(teamB || 'Squadra')}" loading="lazy" decoding="async" onerror="this.src='${TEAM_LOGO_FALLBACK_PATH}'">
+                            ${renderTeamAvatar(teamB, logoB)}
                             <span>${escapeHtml(teamB || 'Squadra B')}</span>
                         </div>
                     </div>
@@ -1570,7 +1623,7 @@ async function autoSyncGmailDesignazioni() {
             if (btn === quickBtn) {
                 btn.innerHTML = isLoading
                     ? '<svg class="spin-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"/></svg> <span>Sincronizzazione in corso...</span>'
-                    : '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg> <span>⚡ Sincronizza Gmail</span>';
+                    : '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg> <span>Sincronizza Gmail</span>';
             } else if (btn === innerBtn) {
                 btn.textContent = isLoading ? '⏳ Sincronizzazione in corso...' : '⚡ Sincronizzazione automatica 1-Click';
             }
@@ -2729,63 +2782,110 @@ function getSortedDashboardEventsWithIndex() {
 function buildDashboardEventRow(item) {
     const evento = item.evento;
     const mapsUrl = getMapsUrl(evento);
-    const calendarText = `${evento.categoria}: ${evento.squadre}`;
+    const calendarText = `${evento.categoria || 'Gara'}: ${evento.squadre || 'Partita'}`;
     const calendarDetails = buildCalendarDescription(evento);
+    const calendarUrl = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(calendarText)}&dates=${formatDataGoogle(evento.data, evento.ora)}&details=${encodeURIComponent(calendarDetails)}&location=${encodeURIComponent(evento.locationText || '')}`;
     const [teamA, teamB] = splitMatchTeams(evento.squadre || '');
     const logoA = getTeamLogoForPreview(teamA);
     const logoB = getTeamLogoForPreview(teamB);
-    const kmText = Number(evento.km || 0) > 0 ? `${Number(evento.km || 0)} km` : 'km n/d';
+    const kmText = Number(evento.km || 0) > 0 ? `${Number(evento.km || 0)} km` : '';
     const rimborsoText = `${Number(evento.rimborso || 0)} €`;
     const dateTime = [evento.data, evento.ora].filter(Boolean).join(' · ');
+    const venueText = evento.locationText || evento.luogo || evento.impianto || '';
+
     const row = document.createElement('tr');
     row.classList.add(evento.pagata ? 'event-paid-row' : 'event-unpaid-row');
     row.innerHTML = `
-            <td colspan="8" class="event-card-cell">
-                <article class="gmail-preview-item dashboard-preview-item ${evento.pagata ? 'is-valid' : 'is-invalid'}">
-                    <div class="gmail-match-card">
-                        <div class="gmail-match-teams">
-                            <div class="gmail-team-chip">
-                                <img src="${escapeHtml(logoA)}" alt="Logo ${escapeHtml(teamA || 'Squadra')}" loading="lazy" decoding="async" onerror="this.src='${TEAM_LOGO_FALLBACK_PATH}'">
-                                <span>${escapeHtml(teamA || 'Squadra A')}</span>
-                            </div>
-                            <div class="gmail-vs">VS</div>
-                            <div class="gmail-team-chip">
-                                <img src="${escapeHtml(logoB)}" alt="Logo ${escapeHtml(teamB || 'Squadra')}" loading="lazy" decoding="async" onerror="this.src='${TEAM_LOGO_FALLBACK_PATH}'">
-                                <span>${escapeHtml(teamB || 'Squadra B')}</span>
-                            </div>
-                        </div>
-                        <div class="gmail-match-meta">${escapeHtml(dateTime || 'Data/Ora n/d')}</div>
-                        <div class="gmail-match-badges">
-                            <span class="gmail-badge">${escapeHtml(evento.categoria || 'Categoria n/d')}</span>
-                            <span class="gmail-badge">${escapeHtml(kmText)}</span>
-                            <span class="gmail-badge gmail-badge-money">${escapeHtml(rimborsoText)}</span>
-                        </div>
-                        <div class="dashboard-card-actions">
-                            <a class="icon-link maps-link" target="_blank" rel="noopener noreferrer" href="${mapsUrl}" title="Apri su Google Maps" aria-label="Apri su Google Maps">
-                                <img src="img/maps.png" alt="Google Maps">
-                            </a>
-                            <a class="icon-link calendar-link" target="_blank" rel="noopener noreferrer" href="https://calendar.google.com/calendar/render?action=TEMPLATE&text=${encodeURIComponent(calendarText)}&dates=${formatDataGoogle(evento.data, evento.ora)}&details=${encodeURIComponent(calendarDetails)}&location=${encodeURIComponent(evento.locationText)}" title="Aggiungi a Google Calendar" aria-label="Aggiungi a Google Calendar">
-                                <img src="img/calendar.svg" alt="Google Calendar">
-                            </a>
-                            <button type="button" class="event-paid-btn ${evento.pagata ? 'is-paid' : ''}" onclick="toggleDashboardEventPaid(${item.index})" aria-label="${evento.pagata ? 'Segna non pagata' : 'Segna pagata'}" title="${evento.pagata ? 'Segna non pagata' : 'Segna pagata'}">
-                                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                    <path d="M20 6L9 17l-5-5"></path>
-                                </svg>
-                            </button>
-                            <button type="button" class="event-remove-btn" onclick="removeDashboardEvent(${item.index})" aria-label="Elimina evento" title="Elimina evento">
-                                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                    <path d="M3 6h18"></path>
-                                    <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2"></path>
-                                    <path d="M19 6l-1 14a1 1 0 0 1-1 .93H7a1 1 0 0 1-1-.93L5 6"></path>
-                                    <path d="M10 11v6"></path>
-                                    <path d="M14 11v6"></path>
-                                </svg>
-                            </button>
-                        </div>
+        <td colspan="8" class="event-card-cell">
+            <article class="match-card ${evento.pagata ? 'is-paid' : 'is-unpaid'}">
+                <header class="match-card-header">
+                    <div class="match-time-pill" title="Data e ora gara">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        <span>${escapeHtml(dateTime || 'Data da definire')}</span>
                     </div>
-                </article>
-            </td>
-        `;
+                    <div class="match-header-badges">
+                        ${evento.categoria ? `<span class="match-badge match-category-badge">${escapeHtml(evento.categoria)}</span>` : ''}
+                        ${evento.pagata ? `
+                            <span class="match-badge match-status-paid" title="Compenso saldato">
+                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                                <span>Pagata</span>
+                            </span>
+                        ` : `
+                            <span class="match-badge match-status-unpaid" title="In attesa di liquidazione">
+                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+                                <span>Da pagare</span>
+                            </span>
+                        `}
+                    </div>
+                </header>
+
+                <div class="match-versus-area ${teamB ? '' : 'is-single-team'}">
+                    <div class="match-team match-team-home">
+                        ${renderTeamAvatar(teamA, logoA)}
+                        <span class="match-team-name" title="${escapeHtml(teamA || 'Squadra Casa')}">${escapeHtml(teamA || 'Squadra Casa')}</span>
+                    </div>
+
+                    ${teamB ? `
+                        <div class="match-vs-badge" aria-label="Versus">VS</div>
+                        <div class="match-team match-team-away">
+                            ${renderTeamAvatar(teamB, logoB)}
+                            <span class="match-team-name" title="${escapeHtml(teamB || 'Squadra Trasferta')}">${escapeHtml(teamB || 'Squadra Trasferta')}</span>
+                        </div>
+                    ` : ''}
+                </div>
+
+                <div class="match-details-strip">
+                    <div class="match-venue-box">
+                        ${venueText ? `
+                            <a class="match-venue-link" href="${mapsUrl}" target="_blank" rel="noopener noreferrer" title="Vedi impianto su mappa">
+                                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+                                <span class="match-venue-text">${escapeHtml(venueText)}</span>
+                            </a>
+                        ` : `
+                            <span class="match-venue-muted">Impianto non specificato</span>
+                        `}
+                    </div>
+
+                    <div class="match-metrics-group">
+                        ${kmText ? `
+                            <span class="match-meta-pill" title="Distanza stimata">
+                                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M16.2 7.8l-2 6.3-6.4 2 2-6.3z"/></svg>
+                                <span>${escapeHtml(kmText)}</span>
+                            </span>
+                        ` : ''}
+                        <span class="match-meta-pill match-pill-money" title="Rimborso gara">
+                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+                            <span>${escapeHtml(rimborsoText)}</span>
+                        </span>
+                    </div>
+                </div>
+
+                <footer class="match-actions-bar">
+                    <a class="match-action-btn action-link-maps" target="_blank" rel="noopener noreferrer" href="${mapsUrl}" title="Apri navigazione Google Maps" aria-label="Apri su Google Maps">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
+                        <span>Mappa</span>
+                    </a>
+                    <a class="match-action-btn action-link-calendar" target="_blank" rel="noopener noreferrer" href="${calendarUrl}" title="Aggiungi a Google Calendar" aria-label="Aggiungi a Google Calendar">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                        <span>Calendario</span>
+                    </a>
+                    <button type="button" class="match-action-btn action-btn-pay ${evento.pagata ? 'is-paid' : 'is-unpaid'}" onclick="toggleDashboardEventPaid(${item.index})" title="${evento.pagata ? 'Segna come non pagata' : 'Segna come pagata'}" aria-label="${evento.pagata ? 'Segna non pagata' : 'Segna pagata'}">
+                        ${evento.pagata ? `
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                            <span>Pagata</span>
+                        ` : `
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 14 14"/></svg>
+                            <span>Segna pagata</span>
+                        `}
+                    </button>
+                    <button type="button" class="match-action-btn action-btn-delete" onclick="removeDashboardEvent(${item.index})" title="Elimina evento dal calendario" aria-label="Elimina evento">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+                        <span>Elimina</span>
+                    </button>
+                </footer>
+            </article>
+        </td>
+    `;
     return row;
 }
 
