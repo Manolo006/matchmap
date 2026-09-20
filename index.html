@@ -71,22 +71,29 @@
         <div class="panel input-panel">
             <h2>Nuova designazione</h2>
             <textarea id="designazione" placeholder="Incolla qui la designazione"></textarea>
-            <button class="primary-btn" onclick="aggiungiEvento()">Aggiungi Evento</button>
+            <div class="input-actions-row">
+                <button class="primary-btn" onclick="aggiungiEvento()">Aggiungi Evento</button>
+                <button id="gmailAutoSyncBtn" class="primary-btn gmail-quick-sync-btn" type="button" onclick="autoSyncGmailDesignazioni()" title="Sincronizza automaticamente le designazioni ricevute da tutte le sezioni AIA via Gmail">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg>
+                    <span>⚡ Sincronizza Gmail</span>
+                </button>
+            </div>
             <details id="gmailImportPanel" class="gmail-panel">
                 <summary>
-                    Import Gmail (opzionale, beta)
-                    <span class="gmail-panel-badge">Advanced</span>
+                    Integrazione Gmail AIA (opzionale, automatico)
+                    <span class="gmail-panel-badge">AIA &amp; CRA</span>
                 </summary>
                 <p class="gmail-privacy-note">
-                    MatchMap puo collegarsi opzionalmente alla tua Gmail per importare automaticamente le email di designazione. Vengono lette solo le email rilevanti e salvati esclusivamente i dati necessari alla gestione delle partite.
+                    Riconosce in automatico le designazioni ricevute da tutte le sezioni AIA d'Italia, CRA e Sinfonia4You escludendo riunioni tecniche (RTO), assemblee, quote e circolari.
                 </p>
                 <p class="gmail-privacy-note gmail-privacy-note-secondary">
-                    Nessuna credenziale Sinfonia4You viene richiesta o salvata. MatchMap non fa scraping di Sinfonia4You: usa solo email ricevute.
+                    Nessuna credenziale Sinfonia4You viene salvata: MatchMap legge solo le email in arrivo autorizzate in sola lettura.
                 </p>
                 <div class="gmail-actions">
+                    <button id="gmailSyncInnerBtn" type="button" class="gmail-inner-sync-btn" onclick="autoSyncGmailDesignazioni()">⚡ Sincronizzazione automatica 1-Click</button>
                     <button id="gmailConnectBtn" type="button" onclick="connectGmailIntegration()">Collega Gmail</button>
                     <button id="gmailDisconnectBtn" type="button" onclick="disconnectGmailIntegration()" hidden>Scollega Gmail</button>
-                    <button id="gmailLoadBtn" type="button" onclick="loadRelevantGmailMessages()" hidden>Cerca email rilevanti</button>
+                    <button id="gmailLoadBtn" type="button" onclick="loadRelevantGmailMessages()" hidden>Cerca solo anteprima</button>
                 </div>
                 <div class="gmail-query-wrap">
                     <label for="gmailQueryInput">Filtro Gmail (solo lettura)</label>

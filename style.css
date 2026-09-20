@@ -418,6 +418,56 @@ textarea:focus {
     justify-self: start;
 }
 
+.input-actions-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+
+.gmail-quick-sync-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: linear-gradient(135deg, #2563eb, #7c3aed);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+    transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+}
+
+.gmail-quick-sync-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(37, 99, 235, 0.5);
+    filter: brightness(1.08);
+}
+
+.gmail-quick-sync-btn:active {
+    transform: translateY(0);
+}
+
+.gmail-quick-sync-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.gmail-inner-sync-btn {
+    background: linear-gradient(135deg, #1d4ed8, #6d28d9) !important;
+    color: #ffffff !important;
+    font-weight: 600 !important;
+    border: 1px solid rgba(255, 255, 255, 0.25) !important;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.spin-icon {
+    animation: spin 0.9s linear infinite;
+}
+
 .total {
     font-size: 1.1rem;
     color: var(--good);

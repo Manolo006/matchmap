@@ -26,8 +26,8 @@ const AUTO_FIELD_SUGGESTIONS_CACHE_KEY = 'matchmap_auto_field_suggestions_v1';
 const DASHBOARD_AUTH_SNAPSHOT_KEY = 'matchmap_dashboard_auth_snapshot_v1';
 const GMAIL_INTEGRATION_STORAGE_KEY = 'matchmap_gmail_integration_v1';
 const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
-const GMAIL_DEFAULT_QUERY = 'from:(noreply OR no-reply OR designazioni OR aia) (sinfonia OR designazione OR "sei designato" OR "gara n.") newer_than:365d';
-const GMAIL_FALLBACK_QUERY = '("notifica di designazione" OR designazione OR rimborso OR "rimborso totale" OR "gara :" OR "numero gara") newer_than:365d';
+const GMAIL_DEFAULT_QUERY = '(from:(aia OR "aia-figc.it" OR cra OR sinfonia4you OR servizisportivi OR designazioni) OR to:(aia OR "aia-figc.it") OR subject:(designazione OR "notifica di designazione" OR "sei designato" OR "gara n.")) -subject:(riunione OR assemblea OR convocazione OR polo OR quota OR circolare OR auguri OR cena) newer_than:365d';
+const GMAIL_FALLBACK_QUERY = '("notifica di designazione" OR designazione OR "sei designato" OR "numero gara" OR "gara :") -subject:(riunione OR assemblea OR convocazione OR polo OR quota OR circolare) newer_than:365d';
 
 async function loadLuoghiDb() {
     try {
@@ -650,7 +650,9 @@ function getGmailUiRefs() {
         previewWrap: document.getElementById('gmailPreviewWrap'),
         previewList: document.getElementById('gmailPreviewList'),
         importBtn: document.getElementById('gmailImportSelectedBtn'),
-        selectAllBtn: document.getElementById('gmailSelectAllBtn')
+        selectAllBtn: document.getElementById('gmailSelectAllBtn'),
+        autoSyncBtn: document.getElementById('gmailAutoSyncBtn'),
+        syncInnerBtn: document.getElementById('gmailSyncInnerBtn')
     };
 }
 
@@ -886,10 +888,11 @@ function extractSquadreFromSubject(subject) {
     }
     const cleaned = raw
         .replace(/^\[[^\]]+\]\s*/i, '')
-        .replace(/^designazione\s+del\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s*:\s*/i, '')
+        .replace(/^(?:notifica\s+di\s+)?designazione(?:\s+gara\s*n\.?\s*\d+)?(?:\s+del\s+\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)?\s*:\s*/i, '')
+        .replace(/^variazione(?:\s+designazione)?(?:\s+gara\s*n\.?\s*\d+)?\s*:\s*/i, '')
         .replace(/\s+/g, ' ')
         .trim();
-    const m = cleaned.match(/^(.+?)\s*-\s*(.+)$/);
+    const m = cleaned.match(/^(.+?)\s*(?:-|–|—|vs\.?)\s*(.+)$/i);
     if (!m) {
         return '';
     }
@@ -899,6 +902,89 @@ function extractSquadreFromSubject(subject) {
         return '';
     }
     return `${a} - ${b}`;
+}
+
+function isAiaSender(fromHeader) {
+    const raw = String(fromHeader || '').toLowerCase();
+    if (!raw) {
+        return false;
+    }
+    // Riconosce abbreviazioni come "a.i.a." -> "aia" evitando parole casuali
+    const normalizedAia = raw.replace(/\ba\.i\.a\.?\b/gi, 'aia');
+    const clean = normalizedAia.replace(/[\.\-_]/g, ' ');
+
+    // 1. Contiene 'aia' come parola separata (es. "Sezione A.I.A.", "AIA Civitavecchia", "AIA Roma 1")
+    const hasAiaWord = /\baia\b/.test(clean);
+    // 2. Contiene il dominio o prefisso aia (tutte le sezioni d'Italia usano @aia-figc.it oppure sezione.aia.*@gmail.com / aia*@...)
+    const hasAiaEmail = /@(?:[a-z0-9-]+\.)*aia(?:-figc)?\.[a-z]{2,}/i.test(raw)
+        || /(?:^|[^a-z0-9])aia[a-z0-9._-]*@/i.test(raw)
+        || /@aia-figc\.it/i.test(raw);
+    // 3. Piattaforme ufficiali FIGC/Sinfonia4You o caselle designazioni
+    const hasAiaPlatform = /sinfonia4you|servizisportivi|@.*figc\.it|designaz/i.test(raw);
+    // 4. CRA (Comitati Regionali Arbitri)
+    const hasCra = /\bcra\b/.test(clean) || /(?:^|[^a-z0-9])cra[a-z0-9._-]*@/i.test(raw);
+
+    return Boolean(hasAiaWord || hasAiaEmail || hasAiaPlatform || hasCra);
+}
+
+function isAiaEventOrCircular(subject, snippet = '', body = '') {
+    const subjectClean = normalizeText(subject || '');
+    const fullClean = normalizeText(`${subject || ''} ${snippet || ''} ${String(body || '').slice(0, 1000)}`);
+    if (!fullClean) {
+        return false;
+    }
+
+    // Parole chiave che identificano eventi amministrativi o riunioni da scartare
+    const eventKeywords = [
+        /\brto\b/,
+        /\briunione\b/,
+        /\briunioni\b/,
+        /\bassemblea\b/,
+        /\bconvocazione\b/,
+        /\bpolo\s+(?:sezionale|atletico|di\s+allenamento)\b/,
+        /\ballenament/,
+        /\btest\s+atletic/,
+        /\byo\s*yo\b/,
+        /\bvisita\s+medica\b/,
+        /\bvisite\s+mediche\b/,
+        /\bcertificat[oi]\s+medic/,
+        /\bquota\s+(?:sezionale|associativa)\b/,
+        /\bquote\s+(?:sezionali|associative)\b/,
+        /\bbollettin/,
+        /\bcomunicato\s+ufficiale\b/,
+        /\bcircolar/,
+        /\bcorso\s+arbitr/,
+        /\blezion[ei]\s+corso\b/,
+        /\bcena\s+(?:sezionale|di\s+natale|degli\s+auguri|di\s+fine\s+anno)\b/,
+        /\bpranzo\s+(?:sezionale|degli\s+auguri)\b/,
+        /\btorneo\s+sezionale\b/,
+        /\bfesta\s+sezionale\b/,
+        /\bauguri\s+di\b/,
+        /\bbuone\s+feste\b/,
+        /\bbuon\s+natale\b/,
+        /\bbuona\s+pasqua\b/,
+        /\bcondoglianz/,
+        /\blutto\s+sezionale\b/
+    ];
+
+    // Se l'oggetto della mail è una riunione/assemblea/circolare, scarta tassativamente
+    const subjectIsEvent = eventKeywords.some(rx => rx.test(subjectClean));
+    if (subjectIsEvent) {
+        return true;
+    }
+
+    // Se l'evento è citato nel corpo, verifica che non sia in realtà una designazione con promemoria
+    const textIsEvent = eventKeywords.some(rx => rx.test(fullClean));
+    if (textIsEvent) {
+        const hasMatchClues = /\b(tra|gara\s*n|numero\s+gara|squadre|arbitro\s+effettivo|assistente\s+n|sei\s+designato)\b/.test(fullClean)
+            && /\b\d{1,2}\/\d{1,2}(?:\/\d{2,4})?\b/.test(fullClean);
+        if (hasMatchClues) {
+            return false;
+        }
+        return true;
+    }
+
+    return false;
 }
 
 function buildPreviewEventoFromMessage(message) {
@@ -954,36 +1040,19 @@ function buildPreviewEventoFromMessage(message) {
         evento.locationText = [evento.luogo, evento.impianto, evento.indirizzo].filter(Boolean).join(', ').trim();
     }
 
-    const hasActivityArbitro = /\battivit[àa]\s*:\s*arbitro\b/i.test(sourceText) || /\bsei\s+designato\b/i.test(sourceText);
-    const hasCategoria = /\bcategoria\s*:/i.test(sourceText) || /\bgara\s*n\.?\s*\d+\s+di\s+.+?\s+girone\b/i.test(sourceText);
-    const hasData = /\bdata\s*:/i.test(sourceText) || /\bla\s+partita\s+si\s+disputer[aà]\b/i.test(sourceText);
-    const hasOra = /\bora\s*:/i.test(sourceText) || /\balle\s+ore\s+([01]?\d|2[0-3])[:.]([0-5]\d)\b/i.test(sourceText);
-    const hasCampo = /\bcampo\s*:/i.test(sourceText) || /\bsull['’]impianto\b/i.test(sourceText);
-    const hasKm = /\bdistanza\s*\(\s*km\s*\)\s*:/i.test(sourceText) || /\(\s*\d+\s*km\s*\)/i.test(sourceText);
-    const hasRimborsoLabel = /\brimborso\s+totale\s*\(\s*€\s*\)\s*:/i.test(sourceText) || /\brimborso\s*:\s*\d+(?:[\.,]\d{1,2})?\s*€/i.test(sourceText);
-    const hasRimborsoPositive = Number(evento.rimborso || 0) > 0;
-    const hasCoreImportData = Boolean(
-        evento.data &&
-        evento.ora &&
-        evento.categoria &&
-        hasRimborsoPositive
-    );
+    const isEvent = isAiaEventOrCircular(subject, snippet, sourceText);
+    const hasData = Boolean(evento.data);
+    const hasTeams = Boolean(evento.squadre && (evento.squadre.includes('-') || evento.squadre.length >= 5));
+    const hasGaraNumero = Boolean(evento.garaNumero);
 
-    const valid = Boolean(
-        hasActivityArbitro &&
-        hasCategoria &&
-        hasData &&
-        hasOra &&
-        hasCampo &&
-        (hasKm || Number(evento.km || 0) > 0) &&
-        hasRimborsoLabel &&
-        hasRimborsoPositive &&
-        hasCoreImportData
-    );
+    // Valida per importazione se non è evento/circolare ed ha data e (squadre oppure numero gara)
+    const valid = !isEvent && Boolean(hasData && (hasTeams || hasGaraNumero));
+
     return {
         id: String(message?.id || ''),
         selected: valid,
         valid,
+        isEvent,
         messageMeta: {
             subject,
             from,
@@ -997,10 +1066,28 @@ function buildPreviewEventoFromMessage(message) {
 function isLikelyDesignazioneEmail(item) {
     const meta = item?.messageMeta || {};
     const evento = item?.evento || {};
-    const hay = normalizeText(`${meta.subject || ''} ${meta.from || ''} ${meta.snippet || ''}`);
-    const hasDesignazioneWords = /designazione|sinfonia|aia|gara n|sei designato/.test(hay);
-    const hasCoreParsedFields = Boolean(evento?.data && evento?.ora && evento?.squadre);
-    return hasDesignazioneWords || hasCoreParsedFields;
+    const subject = meta.subject || '';
+    const from = meta.from || '';
+    const snippet = meta.snippet || '';
+
+    // 1. Se è classificata come riunione, assemblea, polo atletico o circolare, scarta tassativamente
+    if (isAiaEventOrCircular(subject, snippet, evento?.designazioneS4yRaw || '')) {
+        return false;
+    }
+
+    // 2. Controllo se il mittente è AIA di qualunque sezione d'Italia
+    const fromAia = isAiaSender(from);
+    const hay = normalizeText(`${subject} ${from} ${snippet}`);
+    const hasDesignazioneWords = /\b(designazione|designazioni|designato|designata|gara n|notifica di designazione|variazione|arbitro effettivo|assistente n)\b/i.test(hay);
+    const hasMatchStructure = Boolean(evento?.data && (evento?.squadre || evento?.garaNumero));
+
+    // Se proviene da un'AIA: basta che abbia termini di designazione o una struttura partita estratta
+    if (fromAia) {
+        return hasDesignazioneWords || hasMatchStructure;
+    }
+
+    // Mittente non esplicitamente riconosciuto come AIA: richiede entrambi per evitare spam
+    return hasDesignazioneWords && hasMatchStructure;
 }
 
 function splitMatchTeams(squadreText) {
@@ -1008,7 +1095,7 @@ function splitMatchTeams(squadreText) {
     if (!raw) {
         return ['', ''];
     }
-    const parts = raw.split(/\s*-\s*/).map(x => x.trim()).filter(Boolean);
+    const parts = raw.split(/\s*(?:-|–|—|vs\.?|v\.?s\.?|\/)\s*/i).map(x => x.trim()).filter(Boolean);
     if (parts.length >= 2) {
         return [parts[0], parts[1]];
     }
@@ -1167,13 +1254,13 @@ function updateGmailUiState() {
     queryInput.disabled = !gmailIntegrationPrefs.enabled;
 
     if (!gmailIntegrationPrefs.enabled) {
-        setGmailStatus('Funzione disattivata. Usa il flusso principale copia/incolla.');
+        setGmailStatus('Gmail non collegata. Clicca "⚡ Sincronizza Gmail" per autorizzare e importare le partite in automatico.');
     } else if (!tokenReady) {
         const linked = gmailIntegrationPrefs.linkedEmail ? ` (${gmailIntegrationPrefs.linkedEmail})` : '';
-        setGmailStatus(`Gmail collegata${linked}. Premi "Collega Gmail" per autorizzare lettura in questa sessione.`);
+        setGmailStatus(`Gmail collegata${linked}. Clicca "⚡ Sincronizza Gmail" per sincronizzare.`);
     } else {
         const linked = gmailIntegrationPrefs.linkedEmail ? ` come ${gmailIntegrationPrefs.linkedEmail}` : '';
-        setGmailStatus(`Gmail autorizzata${linked}. Puoi cercare email rilevanti.`, true);
+        setGmailStatus(`Gmail attiva${linked}. Pronto alla sincronizzazione automatica.`, true);
     }
 }
 
@@ -1472,6 +1559,173 @@ async function importSelectedGmailEvents() {
     showDashboardToast(`Import Gmail completato: ${imported} eventi.`, 'ok');
 }
 
+async function autoSyncGmailDesignazioni() {
+    const quickBtn = document.getElementById('gmailAutoSyncBtn');
+    const innerBtn = document.getElementById('gmailSyncInnerBtn');
+    const syncBtns = [quickBtn, innerBtn].filter(Boolean);
+
+    const setSyncLoading = isLoading => {
+        syncBtns.forEach(btn => {
+            btn.disabled = isLoading;
+            if (btn === quickBtn) {
+                btn.innerHTML = isLoading
+                    ? '<svg class="spin-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-dashoffset="12"/></svg> <span>Sincronizzazione in corso...</span>'
+                    : '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg> <span>⚡ Sincronizza Gmail</span>';
+            } else if (btn === innerBtn) {
+                btn.textContent = isLoading ? '⏳ Sincronizzazione in corso...' : '⚡ Sincronizzazione automatica 1-Click';
+            }
+        });
+    };
+
+    try {
+        setSyncLoading(true);
+
+        if (!isGmailTokenValid()) {
+            setGmailStatus('Richiesta autorizzazione Gmail in corso...');
+            const tokenResponse = await createGmailTokenRequester({ silent: false });
+            gmailAccessToken = String(tokenResponse?.access_token || '').trim();
+            const expiresIn = Number(tokenResponse?.expires_in || 0);
+            gmailTokenExpiresAt = Date.now() + (Number.isFinite(expiresIn) ? expiresIn * 1000 : 0);
+            gmailIntegrationPrefs.enabled = true;
+            const profileEmail = await fetchGmailProfileEmail();
+            if (profileEmail) {
+                gmailIntegrationPrefs.linkedEmail = profileEmail;
+            }
+            await persistGmailIntegrationPrefs();
+            updateGmailUiState();
+        }
+
+        setGmailStatus('Ricerca designazioni AIA da tutte le sezioni...', false);
+
+        const query = String(gmailIntegrationPrefs.query || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY;
+        const fetchMessageRefs = async rawQuery => {
+            const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=80&includeSpamTrash=false&q=${encodeURIComponent(rawQuery)}`;
+            const listData = await gmailApiFetchJson(listUrl);
+            return Array.isArray(listData?.messages) ? listData.messages : [];
+        };
+
+        let messages = await fetchMessageRefs(query);
+        let usedFallback = false;
+        if (!messages.length) {
+            messages = await fetchMessageRefs(GMAIL_FALLBACK_QUERY);
+            usedFallback = true;
+        }
+
+        if (!messages.length) {
+            clearGmailPreview();
+            setGmailStatus('Nessuna email di designazione trovata nella casella.');
+            showDashboardToast('Nessuna email di designazione trovata su Gmail.', 'warn');
+            return;
+        }
+
+        setGmailStatus(`Analisi automatica di ${messages.length} email in corso...`, false);
+
+        const fullMessages = await Promise.all(messages.map(async msg => {
+            const id = String(msg?.id || '').trim();
+            if (!id) return null;
+            try {
+                const detailUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=full`;
+                return await gmailApiFetchJson(detailUrl);
+            } catch {
+                return null;
+            }
+        }));
+
+        const parsedItems = fullMessages
+            .filter(Boolean)
+            .map(buildPreviewEventoFromMessage)
+            .filter(item => item?.id);
+
+        let designationItems = parsedItems.filter(isLikelyDesignazioneEmail);
+
+        if (!designationItems.length && !usedFallback) {
+            const fallbackRefs = await fetchMessageRefs(GMAIL_FALLBACK_QUERY);
+            if (fallbackRefs.length) {
+                const fallbackFull = await Promise.all(fallbackRefs.map(async msg => {
+                    const id = String(msg?.id || '').trim();
+                    if (!id) return null;
+                    try {
+                        const detailUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(id)}?format=full`;
+                        return await gmailApiFetchJson(detailUrl);
+                    } catch {
+                        return null;
+                    }
+                }));
+                const fallbackParsed = fallbackFull
+                    .filter(Boolean)
+                    .map(buildPreviewEventoFromMessage)
+                    .filter(item => item?.id);
+                const fallbackLikely = fallbackParsed.filter(isLikelyDesignazioneEmail);
+                if (fallbackLikely.length) {
+                    designationItems = fallbackLikely;
+                    usedFallback = true;
+                }
+            }
+        }
+
+        gmailPreviewItems = designationItems;
+        renderGmailPreviewList();
+
+        const validMatches = designationItems.filter(item => item.valid);
+
+        if (!validMatches.length) {
+            setGmailStatus(`Lette ${messages.length} email: nessuna nuova partita valida trovata (riunioni ed eventi amministrativi sono stati esclusi).`);
+            showDashboardToast('Nessuna nuova partita valida estratta da Gmail.', 'warn');
+            return;
+        }
+
+        const existingFingerprints = new Set(dashboardEvents.map(buildEventFingerprint));
+        let imported = 0;
+        let duplicates = 0;
+
+        for (const item of validMatches) {
+            const evento = ensureEventoShape(item.evento || {}, 0);
+            const fingerprint = buildEventFingerprint(evento);
+            if (!fingerprint || existingFingerprints.has(fingerprint)) {
+                duplicates += 1;
+                continue;
+            }
+            existingFingerprints.add(fingerprint);
+            dashboardEvents.push(normalizeDashboardEvent({
+                data: evento.data,
+                ora: evento.ora,
+                luogo: evento.luogo || '',
+                impianto: evento.impianto || '',
+                indirizzo: evento.indirizzo || '',
+                designazioneS4yRaw: evento.designazioneS4yRaw || '',
+                locationText: evento.locationText || '',
+                squadre: evento.squadre || '',
+                categoria: evento.categoria || '',
+                garaNumero: evento.garaNumero || '',
+                girone: evento.girone || '',
+                arbitro: evento.arbitro || '',
+                rimborso: Number(evento.rimborso || 0),
+                km: Number(evento.km || 0)
+            }));
+            imported += 1;
+        }
+
+        if (imported > 0) {
+            renderDashboardEvents();
+            await persistDashboardEvents();
+            const msg = `Sincronizzate ${imported} nuove partite da Gmail!${duplicates > 0 ? ` (${duplicates} già presenti)` : ''}`;
+            setGmailStatus(msg, true);
+            showDashboardToast(`⚡ ${msg}`, 'ok');
+        } else {
+            const msg = `Tutte le ${duplicates} partite trovate nelle email sono già presenti nella dashboard.`;
+            setGmailStatus(msg, true);
+            showDashboardToast(msg, 'warn');
+        }
+
+    } catch (error) {
+        setGmailStatus(`Errore sincronizzazione: ${error.message}`);
+        showDashboardToast(`Errore Gmail: ${error.message}`, 'err');
+    } finally {
+        setSyncLoading(false);
+    }
+}
+
+
 function handleGmailPreviewSelectionChange(event) {
     const target = event.target;
     if (!(target instanceof HTMLInputElement)) {
@@ -1752,13 +2006,15 @@ function parseDesignazione(testo, options = {}) {
 }
 
 function buildEventFingerprint(evento) {
+    if (evento.garaNumero && evento.data) {
+        return normalizeText(`gara|${evento.garaNumero}|${evento.data}`);
+    }
     const keyParts = [
         evento.garaNumero || '',
         evento.data || '',
         evento.ora || '',
         evento.squadre || '',
-        evento.categoria || '',
-        Number(evento.rimborso || 0) || 0
+        evento.categoria || ''
     ];
     return normalizeText(keyParts.join('|'));
 }
