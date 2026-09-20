@@ -238,6 +238,15 @@
         }
     }
 
+    function escapeHtml(value) {
+        return String(value || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function renderAccountInfo(user, profile) {
         if (!user) {
             el.accountInfo.innerHTML = '<b>Stato</b><span>Non autenticato</span>';
@@ -254,7 +263,7 @@
             ['Avatar', avatar === '-' ? '-' : 'Impostato'],
             ['Creato', user.metadata?.creationTime || '-'],
             ['Ultimo accesso', user.metadata?.lastSignInTime || '-']
-        ].map(row => '<b>' + row[0] + '</b><span>' + row[1] + '</span>').join('');
+        ].map(row => '<b>' + escapeHtml(row[0]) + '</b><span>' + escapeHtml(row[1]) + '</span>').join('');
     }
 
     async function loadProfile(user) {

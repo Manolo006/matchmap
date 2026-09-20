@@ -1070,6 +1070,11 @@ a:hover {
     background: linear-gradient(145deg, rgba(50, 10, 20, 0.92), rgba(8, 16, 31, 0.95));
 }
 
+.dashboard-toast.ok {
+    border-color: rgba(52, 211, 153, 0.65);
+    background: linear-gradient(145deg, rgba(6, 44, 28, 0.92), rgba(8, 16, 31, 0.95));
+}
+
 #luoghiMap {
     height: clamp(280px, 52vh, 460px);
     position: relative;
@@ -1940,5 +1945,69 @@ a:hover {
     #paymentsTable td {
         font-size: 0.72rem;
         padding: 5px 4px;
+    }
+}
+
+.table-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.table-header-row h2 {
+    margin: 0;
+}
+
+.dashboard-csv-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.csv-action-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(18, 30, 54, 0.85);
+    color: #cbd5e1;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 10px;
+    padding: 6px 12px;
+    font-size: 0.84rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.18s ease;
+}
+
+.csv-action-btn:hover {
+    background: rgba(30, 48, 86, 0.95);
+    border-color: rgba(105, 209, 255, 0.6);
+    color: #ffffff;
+    transform: translateY(-1px);
+}
+
+.csv-action-btn svg {
+    width: 15px;
+    height: 15px;
+    fill: currentColor;
+    flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+    .table-header-row {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .dashboard-csv-actions {
+        width: 100%;
+    }
+    .csv-action-btn {
+        flex: 1;
+        justify-content: center;
+        font-size: 0.78rem;
+        padding: 7px 8px;
     }
 }

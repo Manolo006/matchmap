@@ -55,7 +55,6 @@ const newsList = document.getElementById('newsList');
 const emptyState = document.getElementById('emptyState');
 const publishBtn = document.getElementById('publishBtn');
 const loadRemoteBtn = document.getElementById('loadRemoteBtn');
-const preview = document.getElementById('preview');
 const statusEl = document.getElementById('status');
 
 const luogoNomeInput = document.getElementById('luogoNomeInput');
@@ -73,18 +72,39 @@ const luoghiEmptyState = document.getElementById('luoghiEmptyState');
 const luoghiSearchInput = document.getElementById('luoghiSearchInput');
 const luoghiPublishBtn = document.getElementById('luoghiPublishBtn');
 const luoghiLoadBtn = document.getElementById('luoghiLoadBtn');
-const luoghiPreview = document.getElementById('luoghiPreview');
 const luoghiStatusEl = document.getElementById('luoghiStatus');
 const paymentsSheetBody = document.getElementById('paymentsSheetBody');
 const paymentsAddRowBtn = document.getElementById('paymentsAddRowBtn');
 const paymentsDeleteRowBtn = document.getElementById('paymentsDeleteRowBtn');
 const paymentsPublishBtn = document.getElementById('paymentsPublishBtn');
 const paymentsLoadBtn = document.getElementById('paymentsLoadBtn');
+const paymentsExportCsvBtn = document.getElementById('paymentsExportCsvBtn');
+const paymentsImportCsvBtn = document.getElementById('paymentsImportCsvBtn');
+const paymentsCsvFileInput = document.getElementById('paymentsCsvFileInput');
 const paymentsStatusEl = document.getElementById('paymentsStatus');
 const suggestionsLoadBtn = document.getElementById('suggestionsLoadBtn');
 const suggestionsStatusEl = document.getElementById('suggestionsStatus');
 const suggestionsEmptyState = document.getElementById('suggestionsEmptyState');
 const suggestionsList = document.getElementById('suggestionsList');
+
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function debounce(fn, delay = 180) {
+    let timer = null;
+    return function (...args) {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+            fn.apply(this, args);
+        }, delay);
+    };
+}
 const TUTTOCAMPO_TEAM_SEARCH_URL = 'https://www.tuttocampo.it/Ajax/GetTeams';
 const TUTTOCAMPO_DEFAULT_REGION = 'Lazio';
 const TUTTOCAMPO_LOGO_OVERRIDES = {
@@ -663,9 +683,9 @@ function renderNewsList() {
         const card = document.createElement('article');
         card.className = 'item';
         card.innerHTML = `
-            <h3>${item.titolo}</h3>
-            <div class="meta">Regione: ${item.regione}</div>
-            <p>${item.testo}</p>
+            <h3>${escapeHtml(item.titolo)}</h3>
+            <div class="meta">Regione: ${escapeHtml(item.regione)}</div>
+            <p>${escapeHtml(item.testo)}</p>
             <div class="item-actions">
                 <button type="button" data-action="edit-news" data-index="${index}">Modifica</button>
                 <button type="button" data-action="delete-news" data-index="${index}">Elimina</button>
@@ -717,18 +737,19 @@ function renderLuoghiList() {
         const hasCoords = Number.isFinite(latNum)
             && Number.isFinite(lngNum)
             && !(Math.abs(latNum) < 0.000001 && Math.abs(lngNum) < 0.000001);
-        const mapsBtn = (!hasCoords && item.mapsUrl)
-            ? `<div class="item-actions item-actions-right"><a class="item-action-link" href="${item.mapsUrl}" target="_blank" rel="noopener noreferrer">Google Maps</a></div>`
+        const safeMapsUrl = item.mapsUrl ? escapeHtml(item.mapsUrl) : '';
+        const mapsBtn = (!hasCoords && safeMapsUrl)
+            ? `<div class="item-actions item-actions-right"><a class="item-action-link" href="${safeMapsUrl}" target="_blank" rel="noopener noreferrer">Google Maps</a></div>`
             : '';
         const card = document.createElement('article');
         card.className = 'item';
         card.innerHTML = `
-            <h3>${item.nome}</h3>
-            <div class="meta">${item.indirizzo || '-'}</div>
-            <p class="item-pre"><strong>Maps:</strong> ${item.mapsUrl || '-'}</p>
-            <p class="item-pre"><strong>Logo squadra:</strong> ${item.logoUrl || '-'}</p>
-            <p class="item-pre"><strong>Designazione s4y:</strong> ${(Array.isArray(item.designazioneS4y) && item.designazioneS4y.length) ? item.designazioneS4y.join('; ') : '-'}</p>
-            <p class="item-pre"><strong>Coordinate:</strong> ${item.lat ?? '-'}, ${item.lng ?? '-'}</p>
+            <h3>${escapeHtml(item.nome)}</h3>
+            <div class="meta">${escapeHtml(item.indirizzo || '-')}</div>
+            <p class="item-pre"><strong>Maps:</strong> ${safeMapsUrl || '-'}</p>
+            <p class="item-pre"><strong>Logo squadra:</strong> ${escapeHtml(item.logoUrl || '-')}</p>
+            <p class="item-pre"><strong>Designazione s4y:</strong> ${(Array.isArray(item.designazioneS4y) && item.designazioneS4y.length) ? escapeHtml(item.designazioneS4y.join('; ')) : '-'}</p>
+            <p class="item-pre"><strong>Coordinate:</strong> ${escapeHtml(item.lat ?? '-')}, ${escapeHtml(item.lng ?? '-')}</p>
             <div class="item-actions">
                 <button type="button" data-action="edit-luogo" data-index="${index}">Modifica</button>
                 <button type="button" data-action="delete-luogo" data-index="${index}">Elimina</button>
@@ -762,11 +783,11 @@ function renderPaymentsSheet() {
         const row = document.createElement('tr');
         row.dataset.index = String(index);
         row.innerHTML = `
-            <td contenteditable="true" data-field="regione">${item.regione || ''}</td>
-            <td contenteditable="true" data-field="inPagamento">${item.inPagamento || ''}</td>
-            <td contenteditable="true" data-field="fineFebbraio">${item.fineFebbraio || ''}</td>
-            <td contenteditable="true" data-field="chat">${item.chat || ''}</td>
-            <td contenteditable="true" data-field="stato">${item.stato || ''}</td>
+            <td contenteditable="true" data-field="regione">${escapeHtml(item.regione || '')}</td>
+            <td contenteditable="true" data-field="inPagamento">${escapeHtml(item.inPagamento || '')}</td>
+            <td contenteditable="true" data-field="fineFebbraio">${escapeHtml(item.fineFebbraio || '')}</td>
+            <td contenteditable="true" data-field="chat">${escapeHtml(item.chat || '')}</td>
+            <td contenteditable="true" data-field="stato">${escapeHtml(item.stato || '')}</td>
         `;
         paymentsSheetBody.appendChild(row);
     });
@@ -813,23 +834,26 @@ function renderSuggestionsList() {
         const canReview = item.status === 'pending';
         const score = Number(Boolean(item.checks?.hasProofUrl)) + Number(Boolean(item.checks?.hasMapsCoords));
         const scoreLabel = score === 2 ? 'Alta' : score === 1 ? 'Media' : 'Bassa';
-        const mapsLink = item.mapsUrl ? `<a class="item-action-link" href="${item.mapsUrl}" target="_blank" rel="noopener noreferrer">Maps</a>` : '';
-        const proofLink = item.proofUrl ? `<a class="item-action-link" href="${item.proofUrl}" target="_blank" rel="noopener noreferrer">Fonte</a>` : '';
+        const safeMapsUrl = item.mapsUrl ? escapeHtml(item.mapsUrl) : '';
+        const safeProofUrl = item.proofUrl ? escapeHtml(item.proofUrl) : '';
+        const mapsLink = safeMapsUrl ? `<a class="item-action-link" href="${safeMapsUrl}" target="_blank" rel="noopener noreferrer">Maps</a>` : '';
+        const proofLink = safeProofUrl ? `<a class="item-action-link" href="${safeProofUrl}" target="_blank" rel="noopener noreferrer">Fonte</a>` : '';
         const isUpdateSuggestion = item.type === 'campo_update';
         const approveLabel = isUpdateSuggestion ? 'Implementa' : 'Approva';
         const rejectLabel = isUpdateSuggestion ? 'Scarta' : 'Rifiuta';
+        const safeId = escapeHtml(item.id);
         const actions = canReview
-            ? `<button type="button" data-action="approve-suggestion" data-id="${item.id}">${approveLabel}</button>
-               <button type="button" data-action="reject-suggestion" data-id="${item.id}">${rejectLabel}</button>`
-            : `<span class="muted">Gia revisionata (${item.status})</span>`;
+            ? `<button type="button" data-action="approve-suggestion" data-id="${safeId}">${approveLabel}</button>
+               <button type="button" data-action="reject-suggestion" data-id="${safeId}">${rejectLabel}</button>`
+            : `<span class="muted">Gia revisionata (${escapeHtml(item.status)})</span>`;
 
         const card = document.createElement('article');
         card.className = 'item';
         card.innerHTML = `
-            <h3>${item.title || '(senza titolo)'}</h3>
-            <div class="meta">Tipo: ${item.type || '-'} | Squadra: ${item.team || '-'} | Affidabilita: ${scoreLabel}</div>
-            <div class="meta">Utente: ${item.createdByEmail || 'anonimo'} | Data: ${created}</div>
-            <p>${item.text || '-'}</p>
+            <h3>${escapeHtml(item.title || '(senza titolo)')}</h3>
+            <div class="meta">Tipo: ${escapeHtml(item.type || '-')} | Squadra: ${escapeHtml(item.team || '-')} | Affidabilita: ${escapeHtml(scoreLabel)}</div>
+            <div class="meta">Utente: ${escapeHtml(item.createdByEmail || 'anonimo')} | Data: ${escapeHtml(created)}</div>
+            <p>${escapeHtml(item.text || '-')}</p>
             <div class="item-actions">${mapsLink}${proofLink}</div>
             <div class="item-actions">${actions}</div>
         `;
@@ -1948,11 +1972,131 @@ luogoMapsInput.addEventListener('input', scheduleAutoCoordinateResolve);
 luogoNomeInput.addEventListener('input', scheduleAutoResolveIfLinkPresent);
 luogoIndirizzoInput.addEventListener('input', scheduleAutoResolveIfLinkPresent);
 pasteCoordsBtn.addEventListener('click', pasteCoordinatesFromClipboard);
+function exportPaymentsToCsv() {
+    if (!paymentsItems.length) {
+        setPaymentsStatus('Nessun dato pagamenti da esportare.', 'err');
+        return;
+    }
+    const cols = [
+        { key: 'regione', label: paymentsColumns.regione || 'Regione' },
+        { key: 'inPagamento', label: paymentsColumns.inPagamento || 'Pacchi in pagamento' },
+        { key: 'fineFebbraio', label: paymentsColumns.fineFebbraio || 'Fine febbraio' },
+        { key: 'chat', label: paymentsColumns.chat || 'Riscontro chat' },
+        { key: 'stato', label: paymentsColumns.stato || 'Stato' }
+    ];
+    const escapeCsv = val => {
+        const str = String(val ?? '').trim();
+        if (/[;"\r\n]/.test(str)) {
+            return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+    };
+    const headerRow = cols.map(c => escapeCsv(c.label)).join(';');
+    const dataRows = paymentsItems.map(item => {
+        return cols.map(c => escapeCsv(item[c.key])).join(';');
+    });
+    const csvContent = '\uFEFF' + [headerRow, ...dataRows].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `matchmap_pagamenti_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setPaymentsStatus(`Esportate ${paymentsItems.length} righe in CSV con successo!`, 'ok');
+}
+
+function importPaymentsFromCsv(csvText) {
+    const text = String(csvText || '').trim();
+    if (!text) {
+        setPaymentsStatus('File CSV vuoto.', 'err');
+        return;
+    }
+    const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+    if (lines.length < 2) {
+        setPaymentsStatus("Il file CSV deve contenere un'intestazione e almeno una riga.", 'err');
+        return;
+    }
+    const delimiter = lines[0].includes(';') ? ';' : lines[0].includes('\t') ? '\t' : ',';
+    
+    const parseLine = line => {
+        const result = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === '"') {
+                if (inQuotes && line[i + 1] === '"') {
+                    current += '"';
+                    i++;
+                } else {
+                    inQuotes = !inQuotes;
+                }
+            } else if (ch === delimiter && !inQuotes) {
+                result.push(current.trim());
+                current = '';
+            } else {
+                current += ch;
+            }
+        }
+        result.push(current.trim());
+        return result;
+    };
+
+    const header = parseLine(lines[0]).map(h => normalizeText(h));
+    const findIndex = keywords => header.findIndex(h => keywords.some(k => h.includes(k)));
+
+    let regIdx = findIndex(['region']);
+    let inPagIdx = findIndex(['pacch', 'pagament', 'inpagamento']);
+    let fineFebIdx = findIndex(['fine', 'febbraio']);
+    let chatIdx = findIndex(['chat', 'riscontro']);
+    let statoIdx = findIndex(['stat']);
+
+    if (regIdx === -1) regIdx = 0;
+    if (inPagIdx === -1) inPagIdx = 1;
+    if (fineFebIdx === -1) fineFebIdx = 2;
+    if (chatIdx === -1) chatIdx = 3;
+    if (statoIdx === -1) statoIdx = 4;
+
+    const newItems = [];
+    for (let i = 1; i < lines.length; i++) {
+        const cells = parseLine(lines[i]);
+        if (!cells || !cells.length || cells.every(c => !c)) continue;
+        const regione = cells[regIdx] || '';
+        const inPagamento = cells[inPagIdx] || '';
+        const fineFebbraio = cells[fineFebIdx] || '';
+        const chat = cells[chatIdx] || '';
+        const stato = cells[statoIdx] || '';
+        if (regione || inPagamento || stato) {
+            newItems.push({
+                regione,
+                inPagamento,
+                fineFebbraio,
+                chat,
+                stato
+            });
+        }
+    }
+
+    if (!newItems.length) {
+        setPaymentsStatus('Nessuna riga valida trovata nel file CSV.', 'err');
+        return;
+    }
+
+    paymentsItems = newItems;
+    savePaymentsDraft();
+    renderPaymentsSheet();
+    setPaymentsStatus(`Importate con successo ${paymentsItems.length} righe pagamenti dal CSV!`, 'ok');
+}
+
 if (luoghiSearchInput) {
-    luoghiSearchInput.addEventListener('input', event => {
+    const handleLuoghiSearch = debounce(event => {
         luoghiSearchTerm = String(event.target?.value || '');
         renderLuoghiList();
-    });
+    }, 180);
+    luoghiSearchInput.addEventListener('input', handleLuoghiSearch);
 }
 if (paymentsAddRowBtn) {
     paymentsAddRowBtn.addEventListener('click', addPaymentRow);
@@ -1965,6 +2109,31 @@ if (paymentsPublishBtn) {
 }
 if (paymentsLoadBtn) {
     paymentsLoadBtn.addEventListener('click', () => loadPaymentsFromFirebase(false));
+}
+if (paymentsExportCsvBtn) {
+    paymentsExportCsvBtn.addEventListener('click', exportPaymentsToCsv);
+}
+if (paymentsImportCsvBtn) {
+    paymentsImportCsvBtn.addEventListener('click', () => {
+        if (paymentsCsvFileInput) paymentsCsvFileInput.click();
+    });
+}
+if (paymentsCsvFileInput) {
+    paymentsCsvFileInput.addEventListener('change', event => {
+        const file = event.target?.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = e => {
+            const content = String(e.target?.result || '');
+            importPaymentsFromCsv(content);
+            paymentsCsvFileInput.value = '';
+        };
+        reader.onerror = () => {
+            setPaymentsStatus('Errore nella lettura del file CSV.', 'err');
+            paymentsCsvFileInput.value = '';
+        };
+        reader.readAsText(file, 'utf-8');
+    });
 }
 
 loginBtn.addEventListener('click', firebaseLogin);

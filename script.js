@@ -108,6 +108,16 @@ function getRegionLogoPath(regionName) {
     return regionLogoMap[region] || null;
 }
 
+function debounce(fn, delay = 180) {
+    let timer = null;
+    return function (...args) {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+            fn.apply(this, args);
+        }, delay);
+    };
+}
+
 function showDashboardToast(message, type = 'warn') {
     let toast = document.getElementById('dashboardToast');
     if (!toast) {
@@ -354,8 +364,8 @@ function renderMapSearchSuggestions() {
         const isActive = index === mapSearchActiveIndex ? ' is-active' : '';
         return `
             <button type="button" class="map-search-suggestion${isActive}" data-index="${index}">
-                <span class="map-search-suggestion-title">${title}</span>
-                <span class="map-search-suggestion-meta">${details || 'Dettagli non disponibili'}</span>
+                <span class="map-search-suggestion-title">${escapeHtml(title)}</span>
+                <span class="map-search-suggestion-meta">${escapeHtml(details || 'Dettagli non disponibili')}</span>
             </button>
         `;
     }).join('');
@@ -462,6 +472,9 @@ function buildTuttocampoLogoCandidates(rawUrl) {
 
 async function resolveTeamLogoUrl(item) {
     const explicitUrl = String(item?.logoUrl || item?.logo || '').trim();
+    if (!explicitUrl) {
+        return TEAM_LOGO_FALLBACK_PATH;
+    }
     const teamName = String(item?.team || item?.nome || '').trim();
     const slug = toTeamLogoSlug(teamName);
     const cacheKey = `${explicitUrl}|${slug}`;
@@ -469,34 +482,15 @@ async function resolveTeamLogoUrl(item) {
         return teamLogoUrlCache.get(cacheKey);
     }
 
-    const candidates = [];
-    if (explicitUrl) {
-        const tuttocampoCandidates = buildTuttocampoLogoCandidates(explicitUrl);
-        if (tuttocampoCandidates.length) {
-            candidates.push(...tuttocampoCandidates);
-        } else {
-            candidates.push(explicitUrl);
-        }
-    }
-    if (slug) {
-        candidates.push(`img/teams/${slug}.png`);
-        candidates.push(`img/teams/${slug}.webp`);
-        candidates.push(`img/teams/${slug}.jpg`);
-        candidates.push(`img/teams/${slug}.jpeg`);
-    }
-    candidates.push(TEAM_LOGO_FALLBACK_PATH);
-
-    for (const url of candidates) {
-        // usa il primo logo raggiungibile, altrimenti fallback logo app
-        const exists = await canLoadImage(url);
-        if (exists) {
-            teamLogoUrlCache.set(cacheKey, url);
-            return url;
-        }
+    const tuttocampoCandidates = buildTuttocampoLogoCandidates(explicitUrl);
+    if (tuttocampoCandidates.length) {
+        const candidate = tuttocampoCandidates[0];
+        teamLogoUrlCache.set(cacheKey, candidate);
+        return candidate;
     }
 
-    teamLogoUrlCache.set(cacheKey, TEAM_LOGO_FALLBACK_PATH);
-    return TEAM_LOGO_FALLBACK_PATH;
+    teamLogoUrlCache.set(cacheKey, explicitUrl);
+    return explicitUrl;
 }
 
 async function resolveTeamLogoUrls(item) {
@@ -535,7 +529,7 @@ function buildTeamLogoStackMarkerHtml(urls) {
         .filter(Boolean)
         .slice(0, 3);
     const slots = safeUrls.map((url, index) => {
-        return `<img src="${url}" alt="Logo squadra ${index + 1}" loading="lazy" decoding="async">`;
+        return `<img src="${url}" alt="Logo squadra ${index + 1}" loading="lazy" decoding="async" onerror="this.src='${TEAM_LOGO_FALLBACK_PATH}'">`;
     }).join('');
     return `<div class="team-logo-stack ${safeUrls.length > 1 ? 'is-multi' : 'is-single'}">${slots}</div>`;
 }
@@ -586,7 +580,7 @@ async function renderLuoghiMap() {
 
     summaryEl.textContent = `Campi in mappa: ${completed.length}. Coordinate mancanti: ${missing.length}.`;
     if (missing.length) {
-        missingEl.innerHTML = `<h4>Coordinate mancanti</h4><p>${missing.map(x => x.nome || 'Luogo senza nome').join(', ')}</p>`;
+        missingEl.innerHTML = `<h4>Coordinate mancanti</h4><p>${missing.map(x => escapeHtml(x.nome || 'Luogo senza nome')).join(', ')}</p>`;
     } else {
         missingEl.innerHTML = '<h4>Tutto pronto</h4><p>Tutti i luoghi hanno coordinate.</p>';
     }
@@ -610,8 +604,8 @@ async function renderLuoghiMap() {
             popupAnchor: [0, -22]
         });
         const marker = L.marker([lat, lng], { icon: teamLogoIcon });
-        const mapsLink = item.mapsUrl ? `<p><a href="${item.mapsUrl}" target="_blank">Apri Maps</a></p>` : '';
-        marker.bindPopup(`<strong>${item.nome || 'Campo'}</strong><br>${item.comune || ''}<br>${item.indirizzo || ''}${mapsLink}`);
+        const mapsLink = item.mapsUrl ? `<p><a href="${escapeHtml(item.mapsUrl)}" target="_blank" rel="noopener noreferrer">Apri Maps</a></p>` : '';
+        marker.bindPopup(`<strong>${escapeHtml(item.nome || 'Campo')}</strong><br>${escapeHtml(item.comune || '')}<br>${escapeHtml(item.indirizzo || '')}${mapsLink}`);
         marker.addTo(luoghiMapLayer);
         bounds.push([lat, lng]);
     });
@@ -2554,11 +2548,21 @@ function updateDashboardShowMoreControls(hiddenCount) {
         : `Mostra di piu (${hiddenCount})`;
 }
 
+let lastDashboardExpirationSignature = '';
+function getDashboardEventStateSignature() {
+    return dashboardEvents.map((evento, idx) => {
+        const startTs = parseEventoDateTime(evento);
+        const expired = startTs !== null && Date.now() >= (startTs + 60 * 1000);
+        return `${idx}:${expired ? 1 : 0}:${evento.pagata ? 1 : 0}`;
+    }).join('|');
+}
+
 function renderDashboardEvents() {
     const tbody = document.querySelector('#eventTable tbody');
     if (!tbody) {
         return;
     }
+    lastDashboardExpirationSignature = getDashboardEventStateSignature();
     tbody.innerHTML = '';
 
     const sortedItems = getSortedDashboardEventsWithIndex();
@@ -2769,13 +2773,235 @@ function toggleDashboardShowMore() {
     renderDashboardEvents();
 }
 
+function checkAndRefreshDashboardEvents() {
+    const currentSig = getDashboardEventStateSignature();
+    if (currentSig !== lastDashboardExpirationSignature) {
+        lastDashboardExpirationSignature = currentSig;
+        renderDashboardEvents();
+    }
+}
+
 function ensureDashboardEventAutoRefresh() {
     if (dashboardEventAutoRefreshTimer) {
         return;
     }
     dashboardEventAutoRefreshTimer = setInterval(() => {
-        renderDashboardEvents();
+        checkAndRefreshDashboardEvents();
     }, 15000);
+}
+
+function exportDashboardEventsToCsv() {
+    if (!dashboardEvents.length) {
+        showDashboardToast('Nessuna partita presente da esportare.', 'warn');
+        return;
+    }
+
+    const headers = [
+        'Data',
+        'Ora',
+        'Squadra Casa',
+        'Squadra Trasferta',
+        'Squadre',
+        'Categoria',
+        'Km',
+        'Rimborso',
+        'Pagata',
+        'Impianto/Indirizzo',
+        'Google Maps'
+    ];
+
+    const escapeCsv = val => {
+        const str = String(val ?? '').trim();
+        if (/[;"\r\n]/.test(str)) {
+            return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+    };
+
+    const headerLine = headers.map(escapeCsv).join(';');
+    const rows = dashboardEvents.map(evento => {
+        const [teamA, teamB] = splitMatchTeams(evento.squadre || '');
+        const mapsUrl = evento.mapsUrl || getMapsUrl(evento) || '';
+        const location = evento.locationText || evento.indirizzo || evento.campo || '';
+        return [
+            escapeCsv(evento.data || ''),
+            escapeCsv(evento.ora || ''),
+            escapeCsv(teamA || ''),
+            escapeCsv(teamB || ''),
+            escapeCsv(evento.squadre || ''),
+            escapeCsv(evento.categoria || ''),
+            escapeCsv(evento.km || '0'),
+            escapeCsv(evento.rimborso || '0'),
+            escapeCsv(evento.pagata ? 'Sì' : 'No'),
+            escapeCsv(location),
+            escapeCsv(mapsUrl)
+        ].join(';');
+    });
+
+    const csvContent = '\uFEFF' + [headerLine, ...rows].join('\r\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `matchmap_partite_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showDashboardToast(`Esportate ${dashboardEvents.length} partite in CSV!`, 'ok');
+}
+
+async function importDashboardEventsFromCsv(csvText) {
+    const text = String(csvText || '').trim();
+    if (!text) {
+        showDashboardToast('File CSV vuoto.', 'err');
+        return;
+    }
+
+    const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
+    if (lines.length < 1) {
+        showDashboardToast('Nessun dato trovato nel file CSV.', 'err');
+        return;
+    }
+
+    const delimiter = lines[0].includes(';') ? ';' : lines[0].includes('\t') ? '\t' : ',';
+
+    const parseLine = line => {
+        const result = [];
+        let current = '';
+        let inQuotes = false;
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === '"') {
+                if (inQuotes && line[i + 1] === '"') {
+                    current += '"';
+                    i++;
+                } else {
+                    inQuotes = !inQuotes;
+                }
+            } else if (ch === delimiter && !inQuotes) {
+                result.push(current.trim());
+                current = '';
+            } else {
+                current += ch;
+            }
+        }
+        result.push(current.trim());
+        return result;
+    };
+
+    const firstRow = parseLine(lines[0]);
+    const normFirstRow = firstRow.map(h => normalizeText(h));
+    const isHeader = normFirstRow.some(h => 
+        h.includes('data') || h.includes('ora') || h.includes('squadr') || h.includes('categ') || h.includes('rimbors')
+    );
+
+    const startIdx = isHeader ? 1 : 0;
+    const findIdx = keywords => normFirstRow.findIndex(h => keywords.some(k => h.includes(k)));
+
+    let dataIdx = isHeader ? findIdx(['data', 'date']) : 0;
+    let oraIdx = isHeader ? findIdx(['ora', 'orario', 'time']) : 1;
+    let squadreIdx = isHeader ? findIdx(['squadr', 'gara', 'partita']) : 2;
+    let catIdx = isHeader ? findIdx(['categ', 'serie']) : 3;
+    let kmIdx = isHeader ? findIdx(['km', 'distanz']) : 4;
+    let rimborsoIdx = isHeader ? findIdx(['rimbors', 'comp']) : 5;
+    let pagataIdx = isHeader ? findIdx(['pagat', 'stato']) : 6;
+    let locationIdx = isHeader ? findIdx(['impiant', 'camp', 'indirizz', 'luog']) : 7;
+    let mapsIdx = isHeader ? findIdx(['maps', 'link']) : 8;
+
+    let addedCount = 0;
+    let duplicateCount = 0;
+
+    for (let i = startIdx; i < lines.length; i++) {
+        const cells = parseLine(lines[i]);
+        if (!cells || cells.length < 2 || cells.every(c => !c)) continue;
+
+        let data = (dataIdx >= 0 && cells[dataIdx]) ? cells[dataIdx].trim() : '';
+        const isoMatch = data.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (isoMatch) {
+            data = `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
+        }
+
+        let ora = (oraIdx >= 0 && cells[oraIdx]) ? cells[oraIdx].trim() : '';
+        if (ora.length === 4 && ora.includes(':')) {
+            ora = '0' + ora;
+        }
+
+        let squadre = (squadreIdx >= 0 && cells[squadreIdx]) ? cells[squadreIdx].trim() : '';
+        if (!squadre && isHeader) {
+            const casaIdx = findIdx(['casa', 'home']);
+            const trasIdx = findIdx(['trasf', 'away', 'ospit']);
+            if (casaIdx >= 0 && trasIdx >= 0 && (cells[casaIdx] || cells[trasIdx])) {
+                squadre = `${cells[casaIdx] || ''} - ${cells[trasIdx] || ''}`.trim();
+            }
+        }
+
+        if (!data && !squadre) continue;
+
+        const categoria = (catIdx >= 0 && cells[catIdx]) ? cells[catIdx].trim() : '';
+        const km = (kmIdx >= 0 && cells[kmIdx]) ? Number(cells[kmIdx].replace(',', '.')) || 0 : 0;
+        const rimborso = (rimborsoIdx >= 0 && cells[rimborsoIdx]) ? Number(cells[rimborsoIdx].replace(',', '.')) || 0 : 0;
+        
+        let pagata = false;
+        if (pagataIdx >= 0 && cells[pagataIdx]) {
+            const pText = normalizeText(cells[pagataIdx]);
+            pagata = ['si', 'sì', 'yes', 'true', '1', 'pagata', 'pagato'].includes(pText);
+        }
+
+        const locationText = (locationIdx >= 0 && cells[locationIdx]) ? cells[locationIdx].trim() : '';
+        const mapsUrl = (mapsIdx >= 0 && cells[mapsIdx]) ? cells[mapsIdx].trim() : '';
+
+        const newEvento = normalizeDashboardEvent({
+            data,
+            ora,
+            squadre,
+            categoria,
+            km,
+            rimborso,
+            pagata,
+            locationText,
+            mapsUrl
+        });
+
+        const fp = buildEventFingerprint(newEvento);
+        const alreadyExists = dashboardEvents.some(e => buildEventFingerprint(e) === fp);
+        if (alreadyExists) {
+            duplicateCount++;
+        } else {
+            dashboardEvents.push(newEvento);
+            addedCount++;
+        }
+    }
+
+    if (addedCount > 0) {
+        dashboardEvents = dedupeDashboardEvents(dashboardEvents);
+        renderDashboardEvents();
+        await persistDashboardEvents();
+        const msg = duplicateCount > 0
+            ? `Importate ${addedCount} nuove partite (${duplicateCount} duplicati saltati).`
+            : `Importate con successo ${addedCount} partite!`;
+        showDashboardToast(msg, 'ok');
+    } else {
+        showDashboardToast(duplicateCount > 0 ? 'Tutte le partite nel file risultano già presenti.' : 'Nessuna partita valida importata.', 'warn');
+    }
+}
+
+function handleDashboardCsvFileSelect(event) {
+    const file = event.target?.files?.[0];
+    if (!file) {
+        return;
+    }
+    const reader = new FileReader();
+    reader.onload = async e => {
+        const content = String(e.target?.result || '');
+        await importDashboardEventsFromCsv(content);
+        event.target.value = '';
+    };
+    reader.onerror = () => {
+        showDashboardToast('Errore lettura file CSV.', 'err');
+        event.target.value = '';
+    };
+    reader.readAsText(file, 'utf-8');
 }
 
 async function removeDashboardEvent(index) {
@@ -2988,9 +3214,9 @@ function renderNews(selectedRegion = 'all') {
         card.innerHTML = `
             <div class="news-item-head">
                 ${logoMarkup}
-                <h4>${item.titolo}</h4>
+                <h4>${escapeHtml(item.titolo)}</h4>
             </div>
-            <p><strong>${item.regione}:</strong> ${item.testo}</p>
+            <p><strong>${escapeHtml(item.regione)}:</strong> ${escapeHtml(item.testo)}</p>
         `;
         container.appendChild(card);
     });
@@ -3287,25 +3513,25 @@ function renderPaymentsTable() {
         const statusBadgeClass = statusClassMap[statusKey] || 'pay-planned';
         const statoText = item.stato || 'aggiornamento';
         const cells = [
-            { label: paymentsColumns.regione || 'Regione', value: item.regione || '-', className: 'pay-cell-region' },
-            { label: paymentsColumns.inPagamento || 'Pacchi in pagamento', value: item.inPagamento || '-', className: 'pay-cell-num' },
-            { label: paymentsColumns.fineFebbraio || 'Fine febbraio', value: item.fineFebbraio || '-', className: 'pay-cell-num' }
+            { label: paymentsColumns.regione || 'Regione', value: escapeHtml(item.regione || '-'), className: 'pay-cell-region' },
+            { label: paymentsColumns.inPagamento || 'Pacchi in pagamento', value: escapeHtml(item.inPagamento || '-'), className: 'pay-cell-num' },
+            { label: paymentsColumns.fineFebbraio || 'Fine febbraio', value: escapeHtml(item.fineFebbraio || '-'), className: 'pay-cell-num' }
         ];
         if (hasAnyChatValue) {
             cells.push({
                 label: paymentsColumns.chat || 'Riscontro chat',
-                value: item.chat || '-',
+                value: escapeHtml(item.chat || '-'),
                 className: 'pay-cell-chat'
             });
         }
         cells.push({
             label: paymentsColumns.stato || 'Stato',
-            value: `<span class="payments-status-badge ${statusBadgeClass}">${statoText}</span>`,
+            value: `<span class="payments-status-badge ${statusBadgeClass}">${escapeHtml(statoText)}</span>`,
             className: 'pay-cell-status'
         });
 
         row.innerHTML = cells
-            .map(cell => `<td data-label="${cell.label}" class="${cell.className || ''}">${cell.value}</td>`)
+            .map(cell => `<td data-label="${escapeHtml(cell.label)}" class="${cell.className || ''}">${cell.value}</td>`)
             .join('');
 
         tbody.appendChild(row);
@@ -3685,9 +3911,10 @@ if (dashboardShowMoreBtn) {
     dashboardShowMoreBtn.addEventListener('click', toggleDashboardShowMore);
 }
 if (mapQuickSearchInput) {
-    mapQuickSearchInput.addEventListener('input', () => {
+    const debouncedMapSuggestions = debounce(() => {
         renderMapSearchSuggestions();
-    });
+    }, 180);
+    mapQuickSearchInput.addEventListener('input', debouncedMapSuggestions);
     mapQuickSearchInput.addEventListener('focus', () => {
         if (mapSearchHideTimer) {
             clearTimeout(mapSearchHideTimer);

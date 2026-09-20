@@ -1,12 +1,16 @@
-const CACHE_NAME = 'matchmap-runtime';
+const CACHE_NAME = 'matchmap-v2';
 const CORE_ASSETS = [
   './',
   './index.html',
   './style.css',
   './script.js',
   './firebase-config.js',
+  './publisher.html',
+  './publisher.css',
+  './publisher.js',
   './account-center.html',
   './account-center.css',
+  './account-center.js',
   './manifest.webmanifest',
   './img/logo.png'
 ];
@@ -18,7 +22,17 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then(keys => {
+      return Promise.all(
+        keys.map(key => {
+          if (key !== CACHE_NAME) {
+            return caches.delete(key);
+          }
+        })
+      );
+    }).then(() => self.clients.claim())
+  );
 });
 
 self.addEventListener('message', event => {

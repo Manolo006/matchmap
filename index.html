@@ -106,7 +106,20 @@
         </div>
 
         <div class="panel table-panel">
-            <h2>Eventi inseriti</h2>
+            <div class="table-header-row">
+                <h2>Eventi inseriti</h2>
+                <div class="dashboard-csv-actions">
+                    <button id="dashboardExportCsvBtn" class="csv-action-btn" type="button" onclick="exportDashboardEventsToCsv()" title="Esporta le partite in formato CSV / Excel">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"></path></svg>
+                        <span>Esporta CSV</span>
+                    </button>
+                    <button id="dashboardImportCsvBtn" class="csv-action-btn" type="button" onclick="document.getElementById('dashboardCsvFileInput')?.click()" title="Importa partite da file CSV">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"></path></svg>
+                        <span>Importa CSV</span>
+                    </button>
+                    <input type="file" id="dashboardCsvFileInput" accept=".csv,.tsv,.txt" hidden onchange="handleDashboardCsvFileSelect(event)">
+                </div>
+            </div>
             <div class="table-wrap">
                 <table id="eventTable">
                     <thead>
@@ -219,6 +232,8 @@
         <button id="closeInstallModalBtn" class="primary-btn install-modal-close" type="button" data-close-install onclick="document.getElementById('iosInstallModal')?.classList.remove('open');document.getElementById('iosInstallModal')?.setAttribute('aria-hidden','true');">Ho capito</button>
     </div>
 </div>
+
+<div id="dashboardToast" class="dashboard-toast" aria-live="polite"></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
