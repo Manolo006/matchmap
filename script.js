@@ -808,9 +808,57 @@ function stripHtmlTags(value) {
     return String(value || '')
         .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, ' ')
         .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<\/(?:tr|p|div|li|h[1-6])>|<br\s*\/?>/gi, '\n')
         .replace(/<[^>]+>/g, ' ')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n\s*\n+/g, '\n')
+        .trim();
+}
+
+function cleanEmailFieldNoise(rawValue) {
+    return String(rawValue || '')
+        .replace(/\b(?:Attivit[àa]|Comitato\/Delegazione|Categoria|Girone|Giornata|Numero\s+Gara|Gara|Data|Ora|Campo|Indirizzo|Localit[àa]|Provincia|Distanza\s*\(\s*km\s*\)|Rimborso\s+Totale(?:\s*\(\s*€\s*\))?)\s*:[\s\S]*$/i, '')
+        .replace(/\b(?:Accedi\s+a\s+(?:\[?\s*Sinfonia4You|http)|EMAIL\s+GENERATA\s+AUTOMATICAMENTE|Operazione\s+processata\s+il)\b[\s\S]*$/i, '')
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function formatLuogoWithProvincia(rawLocalita, rawProvincia = '') {
+    const rawLocStr = String(rawLocalita || '');
+    const inlineProv = rawLocStr.match(/\bProvincia\s*:\s*([A-Z]{2})\b/i)?.[1]?.toUpperCase() || '';
+    let luogoClean = cleanEmailFieldNoise(rawLocStr);
+    if (!luogoClean) {
+        return '';
+    }
+    const dashParts = luogoClean.split(/\s*-\s*/).map(x => x.trim()).filter(Boolean);
+    if (dashParts.length === 2 && normalizeText(dashParts[0]) === normalizeText(dashParts[1])) {
+        luogoClean = dashParts[0];
+    }
+    const provClean = cleanEmailFieldNoise(rawProvincia || inlineProv).toUpperCase();
+    if (/^[A-Z]{2}$/.test(provClean) && !new RegExp(`\\(\\s*${provClean}\\s*\\)$`, 'i').test(luogoClean)) {
+        luogoClean = `${luogoClean} (${provClean})`;
+    }
+    return luogoClean;
+}
+
+function sanitizeEventoLocation(evento) {
+    const item = { ...(evento || {}) };
+    const rawLuogo = String(item.luogo || '');
+    const rawLocationText = String(item.locationText || '');
+    const inlineProv = (rawLuogo.match(/\bProvincia\s*:\s*([A-Z]{2})\b/i)
+        || rawLocationText.match(/\bProvincia\s*:\s*([A-Z]{2})\b/i))?.[1]?.toUpperCase() || '';
+
+    const cleanLuogo = formatLuogoWithProvincia(rawLuogo, item.provincia || inlineProv);
+    const cleanImpianto = cleanEmailFieldNoise(item.impianto || '');
+    const cleanIndirizzo = cleanEmailFieldNoise(item.indirizzo || '');
+
+    item.luogo = cleanLuogo;
+    item.impianto = cleanImpianto;
+    item.indirizzo = cleanIndirizzo;
+
+    const rebuiltLocation = [cleanLuogo, cleanImpianto, cleanIndirizzo].filter(Boolean).join(', ').trim();
+    item.locationText = rebuiltLocation || cleanEmailFieldNoise(rawLocationText);
+    return item;
 }
 
 function extractHeaderValue(headers, name) {
@@ -870,14 +918,13 @@ function formatTimestampAsMatchMapDate(timestampValue) {
 }
 
 function ensureEventoShape(evento, fallbackTimestamp = 0) {
-    const item = { ...(evento || {}) };
+    const item = sanitizeEventoLocation(evento);
     if (!item.ora) {
         const fallback = String(item._gmailDate || '').match(/\b([01]\d|2[0-3]):([0-5]\d)\b/);
         item.ora = fallback ? `${fallback[1]}:${fallback[2]}` : '';
     }
     item.rimborso = Number(item.rimborso || 0);
     item.km = Number(item.km || 0);
-    item.locationText = String(item.locationText || [item.luogo, item.impianto, item.indirizzo].filter(Boolean).join(', ')).trim();
     return item;
 }
 
@@ -1031,12 +1078,13 @@ function buildPreviewEventoFromMessage(message) {
     }
 
     if (!evento.locationText) {
-        const extraCampo = sourceMetaText.match(/\bcampo\s*:\s*([^\r\n]+)/i)?.[1]?.trim() || '';
-        const extraIndirizzo = sourceMetaText.match(/\bindirizzo\s*:\s*([^\r\n]+)/i)?.[1]?.trim() || '';
-        const extraLocalita = sourceMetaText.match(/\blocalit[àa]\s*:\s*([^\r\n]+)/i)?.[1]?.trim() || '';
+        const extraCampo = cleanEmailFieldNoise(sourceMetaText.match(/\bcampo\s*:\s*([^\r\n]+)/i)?.[1] || '');
+        const extraIndirizzo = cleanEmailFieldNoise(sourceMetaText.match(/\bindirizzo\s*:\s*([^\r\n]+)/i)?.[1] || '');
+        const extraLocalita = sourceMetaText.match(/\blocalit[àa]\s*:\s*([^\r\n]+)/i)?.[1] || '';
+        const extraProvincia = cleanEmailFieldNoise(sourceMetaText.match(/\bprovincia\s*:\s*([A-Z]{2})\b/i)?.[1] || '');
         evento.impianto = evento.impianto || extraCampo;
         evento.indirizzo = evento.indirizzo || extraIndirizzo;
-        evento.luogo = evento.luogo || extraLocalita;
+        evento.luogo = evento.luogo || formatLuogoWithProvincia(extraLocalita, extraProvincia);
         evento.locationText = [evento.luogo, evento.impianto, evento.indirizzo].filter(Boolean).join(', ').trim();
     }
 
@@ -1810,13 +1858,11 @@ function initGmailIntegration() {
 function parseDesignazione(testo, options = {}) {
     const extractFieldByLabel = (labelRegexSource, nextLabelSources = []) => {
         const nextBlock = nextLabelSources.length
-            ? `(?=\\b(?:${nextLabelSources.join('|')})\\s*:)`
-            : '(?=$)';
+            ? `(?=(?:\\b(?:${nextLabelSources.join('|')})\\s*:)|\\bAccedi\\s+a\\b|\\bEMAIL\\s+GENERATA\\b|\\bOperazione\\s+processata\\b|$)`
+            : '(?=\\bAccedi\\s+a\\b|\\bEMAIL\\s+GENERATA\\b|\\bOperazione\\s+processata\\b|$)';
         const pattern = new RegExp(`\\b(?:${labelRegexSource})\\s*:\\s*([\\s\\S]*?)${nextBlock}`, 'i');
         const match = String(testo || '').match(pattern);
-        return String(match?.[1] || '')
-            .replace(/\s+/g, ' ')
-            .trim();
+        return cleanEmailFieldNoise(match?.[1] || '');
     };
 
     const fieldOrder = [
@@ -1850,7 +1896,7 @@ function parseDesignazione(testo, options = {}) {
     const categoriaRegex = /\bcategoria\s*:\s*([^\r\n]+)/i;
     const categoriaInlineRegex = /\bgara\s*n\.?\s*\d+\s+di\s+(.+?)\s+girone\b/i;
     const garaNumeroRegex = /\b(?:numero\s+gara|gara\s*n\.?)\s*[:\-]?\s*(\d+)/i;
-    const gironeRegex = /girone\s+([A-Z0-9]+)/i;
+    const gironeRegex = /\bgirone\s*[:\-]?\s*([A-Z0-9]+)\b/i;
     const arbitroRegex = /^([A-Z\s'`]+),\s*sei designato/i;
     const rimborsoRegex = /\brimborso\s+totale\s*\(\s*€\s*\)\s*:\s*(\d+(?:[\.,]\d{1,2})?)/i;
     const rimborsoInlineRegex = /\brimborso\s*:\s*(\d+(?:[\.,]\d{1,2})?)\s*€/i;
@@ -1858,13 +1904,22 @@ function parseDesignazione(testo, options = {}) {
     const kmInlineRegex = /\(\s*(\d+)\s*km\s*\)/i;
     const designazioneS4yRegex = /a\s+(.+?)\s+sull['’]impianto\s+(.+?)\s+sito in\s+([^\r\n]+)/i;
 
-    const luogo = testo.match(luogoRegex)?.[1]?.trim() || '';
-    const impianto = testo.match(impiantoRegex)?.[1]?.trim() || '';
-    const indirizzo = testo.match(indirizzoRegex)?.[1]?.trim() || '';
+    const campoFromTable = extractFieldByLabel('Campo', fieldOrder.filter(x => x !== 'Campo'));
+    const indirizzoFromTable = extractFieldByLabel('Indirizzo', fieldOrder.filter(x => x !== 'Indirizzo'));
+    const localitaFromTable = extractFieldByLabel('Localit[àa]', fieldOrder.filter(x => x !== 'Localit[àa]'));
+    const provinciaFromTable = extractFieldByLabel('Provincia', fieldOrder.filter(x => x !== 'Provincia'));
+
+    const luogoFromS4y = cleanEmailFieldNoise(testo.match(luogoRegex)?.[1]?.trim() || '');
+    const impiantoFromS4y = cleanEmailFieldNoise(testo.match(impiantoRegex)?.[1]?.trim() || '');
+    const indirizzoFromS4y = cleanEmailFieldNoise(testo.match(indirizzoRegex)?.[1]?.trim() || '');
+
+    const luogo = luogoFromS4y || formatLuogoWithProvincia(localitaFromTable, provinciaFromTable);
+    const impianto = impiantoFromS4y || campoFromTable;
+    const indirizzo = indirizzoFromS4y || indirizzoFromTable;
     const designazioneS4yMatch = testo.match(designazioneS4yRegex);
     const designazioneS4yRaw = designazioneS4yMatch
         ? `a ${designazioneS4yMatch[1].trim()} sull'impianto ${designazioneS4yMatch[2].trim()} sito in ${designazioneS4yMatch[3].trim()}`
-        : '';
+        : (luogo && impianto && indirizzo ? `a ${luogo} sull'impianto ${impianto} sito in ${indirizzo}` : '');
     const locationText = [luogo, impianto, indirizzo].filter(Boolean).join(', ');
 
     const oraMainMatch = testo.match(oraRegex);
@@ -2039,6 +2094,7 @@ function parseDesignazione(testo, options = {}) {
     const dataValue = normalizeMatchDate(rawDateValue);
 
     const categoriaFromTable = extractFieldByLabel('Categoria', fieldOrder.filter(x => x !== 'Categoria'));
+    const gironeFromTable = extractFieldByLabel('Girone', fieldOrder.filter(x => x !== 'Girone'));
 
     return {
         data: dataValue,
@@ -2049,9 +2105,9 @@ function parseDesignazione(testo, options = {}) {
         designazioneS4yRaw,
         locationText,
         squadre: squadreValue,
-        categoria: categoriaFromTable || testo.match(categoriaRegex)?.[1]?.trim() || testo.match(categoriaInlineRegex)?.[1]?.trim() || '',
+        categoria: categoriaFromTable || cleanEmailFieldNoise(testo.match(categoriaRegex)?.[1]?.trim() || '') || testo.match(categoriaInlineRegex)?.[1]?.trim() || '',
         garaNumero: testo.match(garaNumeroRegex)?.[1]?.trim() || '',
-        girone: testo.match(gironeRegex)?.[1]?.trim() || '',
+        girone: gironeFromTable || testo.match(gironeRegex)?.[1]?.trim() || '',
         arbitro: testo.match(arbitroRegex)?.[1]?.trim() || '',
         rimborso: rimborsoValue,
         km: Number(testo.match(kmRegex)?.[1] || testo.match(kmInlineRegex)?.[1] || 0)
@@ -2709,7 +2765,7 @@ function getCurrentDashboardUser() {
 }
 
 function normalizeDashboardEvent(raw) {
-    const item = raw || {};
+    const item = sanitizeEventoLocation(raw || {});
     return {
         ...item,
         pagata: Boolean(item.pagata)
@@ -3404,8 +3460,13 @@ async function loadDashboardEvents() {
             const snap = await fb.db.ref(`users/${user.uid}/dashboard/events`).once('value');
             const raw = snap.exists() ? snap.val() : [];
             const list = Array.isArray(raw) ? raw : Object.values(raw || {});
-            dashboardEvents = dedupeDashboardEvents(list.map(normalizeDashboardEvent));
+            const normalizedList = list.map(normalizeDashboardEvent);
+            const needsCleanupSave = list.some((orig, idx) => String(orig?.locationText || '') !== String(normalizedList[idx]?.locationText || ''));
+            dashboardEvents = dedupeDashboardEvents(normalizedList);
             renderDashboardEvents();
+            if (needsCleanupSave) {
+                persistDashboardEvents();
+            }
             return;
         } catch (error) {
             console.warn('Errore lettura cloud dashboard:', error.message);
@@ -3414,7 +3475,13 @@ async function loadDashboardEvents() {
 
     try {
         const raw = JSON.parse(localStorage.getItem(GUEST_EVENTS_STORAGE_KEY) || '[]');
-        dashboardEvents = dedupeDashboardEvents((Array.isArray(raw) ? raw : []).map(normalizeDashboardEvent));
+        const list = Array.isArray(raw) ? raw : [];
+        const normalizedList = list.map(normalizeDashboardEvent);
+        const needsCleanupSave = list.some((orig, idx) => String(orig?.locationText || '') !== String(normalizedList[idx]?.locationText || ''));
+        dashboardEvents = dedupeDashboardEvents(normalizedList);
+        if (needsCleanupSave) {
+            localStorage.setItem(GUEST_EVENTS_STORAGE_KEY, JSON.stringify(dashboardEvents));
+        }
     } catch (error) {
         dashboardEvents = [];
     }
