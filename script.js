@@ -39,6 +39,12 @@ async function loadLuoghiDb() {
                 luoghiDb = Array.isArray(raw) ? raw : Object.values(raw || {});
                 renderLuoghiMap();
                 renderMapSearchSuggestions();
+                if (dashboardEvents.length) {
+                    renderDashboardEvents();
+                }
+                if (gmailPreviewItems.length) {
+                    renderGmailPreviewList();
+                }
                 return;
             }
         }
@@ -1150,18 +1156,111 @@ function splitMatchTeams(squadreText) {
     return [raw, ''];
 }
 
-function extractLogoCandidateFromLuogo(entry) {
-    const raw = entry?.loghiUrl ?? entry?.logoUrl ?? entry?.logo ?? '';
-    const explicitRaw = Array.isArray(raw) ? raw.join(',') : String(raw || '');
-    const explicitFirst = explicitRaw
-        .split(/[,;\n]+/)
-        .map(x => x.trim())
-        .find(Boolean);
-    if (!explicitFirst) {
+const GENERIC_TEAM_LOGO_WORDS = new Set([
+    'calcio', 'football', 'club', 'asd', 'ssd', 'usd', 'pol', 'polisportiva',
+    'sporting', 'citta', 'campo', 'ac', 'fc', 'as', 'ss', 'us', 'di', 'del', 'della'
+]);
+
+function extractTuttocampoTeamSlug(rawUrl) {
+    const match = String(rawUrl || '').match(/\/Squadra\/([^/]+)\/\d+/i);
+    if (!match) {
         return '';
     }
-    const tuttocampoCandidates = buildTuttocampoLogoCandidates(explicitFirst);
-    return tuttocampoCandidates[0] || explicitFirst;
+    const spaced = match[1]
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+        .replace(/([a-zA-Z])(\d)/g, '$1 $2')
+        .replace(/(\d)([a-zA-Z])/g, '$1 $2');
+    return normalizeText(spaced);
+}
+
+function scoreTeamLabelMatch(teamName, candidateLabel) {
+    const normTarget = normalizeText(teamName);
+    const normCand = normalizeText(candidateLabel);
+    if (!normTarget || !normCand) {
+        return 0;
+    }
+
+    const compactTarget = normTarget.replace(/\s+/g, '');
+    const compactCand = normCand.replace(/\s+/g, '');
+    let score = 0;
+
+    if (compactTarget === compactCand) {
+        score += 300;
+    } else if (compactTarget.length >= 4 && compactCand.length >= 4 && (compactCand.includes(compactTarget) || compactTarget.includes(compactCand))) {
+        score += 180;
+    } else if (normCand === normTarget) {
+        score += 260;
+    } else if (normTarget.length >= 4 && normCand.length >= 4 && (normCand.includes(normTarget) || normTarget.includes(normCand))) {
+        score += 140;
+    }
+
+    const targetTokens = normTarget.split(' ').filter(t => t.length >= 3 && !GENERIC_TEAM_LOGO_WORDS.has(t));
+    const candTokens = normCand.split(' ').filter(t => t.length >= 3 && !GENERIC_TEAM_LOGO_WORDS.has(t));
+    targetTokens.forEach(token => {
+        if (candTokens.includes(token)) {
+            score += 45;
+        } else if (token.length >= 4 && candTokens.some(ct => ct.length >= 4 && (ct.includes(token) || token.includes(ct)))) {
+            score += 25;
+        }
+    });
+
+    return score;
+}
+
+function extractLogoCandidateFromLuogo(entry, teamName = '') {
+    const raw = entry?.loghiUrl ?? entry?.logoUrl ?? entry?.logo ?? '';
+    const explicitRaw = Array.isArray(raw) ? raw.join(',') : String(raw || '');
+    const parts = explicitRaw
+        .split(/[,;\n]+/)
+        .map(x => x.trim())
+        .filter(Boolean);
+    if (!parts.length) {
+        return '';
+    }
+
+    const resolveSingleUrl = urlPart => {
+        const tuttocampoCandidates = buildTuttocampoLogoCandidates(urlPart);
+        return tuttocampoCandidates[0] || urlPart;
+    };
+
+    if (parts.length === 1 || !String(teamName || '').trim()) {
+        return resolveSingleUrl(parts[0]);
+    }
+
+    const nameSegments = String(entry?.team || entry?.squadra || entry?.nome || '')
+        .split('|')[0]
+        .split('/')
+        .map(x => x.trim())
+        .filter(Boolean);
+
+    const bestMatchingSegment = nameSegments
+        .map(seg => ({ seg, score: scoreTeamLabelMatch(teamName, seg) }))
+        .sort((a, b) => b.score - a.score)[0];
+    const effectiveSegment = (bestMatchingSegment && bestMatchingSegment.score >= 45)
+        ? bestMatchingSegment.seg
+        : '';
+
+    let bestPart = parts[0];
+    let bestScore = -1;
+
+    parts.forEach((part, idx) => {
+        const slugLabel = extractTuttocampoTeamSlug(part);
+        const directSlugScore = scoreTeamLabelMatch(teamName, slugLabel);
+        const bridgedSlugScore = (effectiveSegment && slugLabel)
+            ? scoreTeamLabelMatch(effectiveSegment, slugLabel)
+            : 0;
+        const positionalScore = (!slugLabel && nameSegments[idx])
+            ? scoreTeamLabelMatch(teamName, nameSegments[idx])
+            : 0;
+        const total = Math.max(directSlugScore, bridgedSlugScore, positionalScore);
+        if (total > bestScore) {
+            bestScore = total;
+            bestPart = part;
+        }
+    });
+
+    return resolveSingleUrl(bestPart);
 }
 
 function findBestLogoEntryForTeam(teamName) {
@@ -1169,39 +1268,42 @@ function findBestLogoEntryForTeam(teamName) {
     if (!norm) {
         return null;
     }
-    const queryTokens = norm.split(' ').filter(token => token.length >= 3);
+
     let best = null;
     let bestScore = 0;
 
     luoghiDb.forEach(item => {
-        const team = normalizeText(item?.team || item?.squadra || item?.nome || '');
-        if (!team) {
+        const rawLogo = item?.loghiUrl ?? item?.logoUrl ?? item?.logo ?? '';
+        const logoParts = (Array.isArray(rawLogo) ? rawLogo.join(',') : String(rawLogo || ''))
+            .split(/[,;\n]+/)
+            .map(x => x.trim())
+            .filter(Boolean);
+        if (!logoParts.length) {
             return;
         }
-        let score = 0;
-        if (team === norm) {
-            score += 200;
-        }
-        if (team.includes(norm) || norm.includes(team)) {
-            score += 120;
-        }
-        const teamTokens = team.split(' ').filter(token => token.length >= 3);
-        queryTokens.forEach(token => {
-            if (teamTokens.includes(token)) {
-                score += 20;
+
+        const rawName = String(item?.team || item?.squadra || item?.nome || '');
+        const teamPartOnly = rawName.split('|')[0] || rawName;
+        const subTeams = teamPartOnly.split('/').map(x => x.trim()).filter(Boolean);
+
+        let itemScore = scoreTeamLabelMatch(teamName, teamPartOnly);
+        subTeams.forEach(sub => {
+            itemScore = Math.max(itemScore, scoreTeamLabelMatch(teamName, sub));
+        });
+        logoParts.forEach(part => {
+            const slug = extractTuttocampoTeamSlug(part);
+            if (slug) {
+                itemScore = Math.max(itemScore, scoreTeamLabelMatch(teamName, slug));
             }
         });
-        const hasLogo = Boolean(extractLogoCandidateFromLuogo(item));
-        if (hasLogo) {
-            score += 15;
-        }
-        if (score > bestScore) {
-            bestScore = score;
+
+        if (itemScore > bestScore) {
+            bestScore = itemScore;
             best = item;
         }
     });
 
-    return bestScore >= 35 ? best : null;
+    return bestScore >= 45 ? best : null;
 }
 
 function getTeamLogoForPreview(teamName) {
@@ -1210,7 +1312,7 @@ function getTeamLogoForPreview(teamName) {
         return '';
     }
     const fromDb = findBestLogoEntryForTeam(name);
-    const dbLogo = extractLogoCandidateFromLuogo(fromDb);
+    const dbLogo = extractLogoCandidateFromLuogo(fromDb, name);
     if (dbLogo) {
         return dbLogo;
     }
