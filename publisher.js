@@ -56,6 +56,7 @@ const emptyState = document.getElementById('emptyState');
 const publishBtn = document.getElementById('publishBtn');
 const loadRemoteBtn = document.getElementById('loadRemoteBtn');
 const statusEl = document.getElementById('status');
+const preview = document.getElementById('preview');
 
 const luogoNomeInput = document.getElementById('luogoNomeInput');
 const luogoIndirizzoInput = document.getElementById('luogoIndirizzoInput');
@@ -73,6 +74,7 @@ const luoghiSearchInput = document.getElementById('luoghiSearchInput');
 const luoghiPublishBtn = document.getElementById('luoghiPublishBtn');
 const luoghiLoadBtn = document.getElementById('luoghiLoadBtn');
 const luoghiStatusEl = document.getElementById('luoghiStatus');
+const luoghiPreview = document.getElementById('luoghiPreview');
 const paymentsSheetBody = document.getElementById('paymentsSheetBody');
 const paymentsAddRowBtn = document.getElementById('paymentsAddRowBtn');
 const paymentsDeleteRowBtn = document.getElementById('paymentsDeleteRowBtn');
@@ -351,19 +353,55 @@ function normalizeNews(item) {
     };
 }
 
-function normalizeLuogo(item) {
-    const raw = item || {};
-    const latRaw = pickFirst(raw, ['lat', 'latitude', 'Latitude']);
-    const lngRaw = pickFirst(raw, ['lng', 'lon', 'longitude', 'Longitude']);
-    const lat = Number(latRaw);
-    const lng = Number(lngRaw);
-    const rawAliases = pickFirst(raw, ['aliases', 'Aliases', 'alias']);
-    const aliases = Array.isArray(rawAliases)
+const CITY_ONLY_ALIAS_BLACKLIST = new Set([
+    'civitavecchia', 'civitavecchia rm', 'civitavecchia campo dell oro rm',
+    'cerveteri', 'cerveteri rm', 'cerveteri due casette rm',
+    'ladispoli', 'ladispoli rm', 'ladispoli campi di vaccina snc rm', 'ladispoli mar s nicola rm',
+    'tarquinia', 'tarquinia vt',
+    'bracciano', 'bracciano rm',
+    'tolfa', 'tolfa rm',
+    'fiumicino', 'fiumicino rm',
+    'cesano di roma', 'cesano di roma rm',
+    'santa marinella', 'santa marinella rm',
+    'montalto di castro', 'montalto di castro vt',
+    'oriolo romano', 'oriolo romano vt',
+    'passoscuro', 'passoscuro rm',
+    'palidoro', 'palidoro rm', 'palidoro ladispoli rm',
+    'viterbo', 'viterbo pilastro', 'viterbo pilastro vt',
+    'anguillara', 'anguillara sabazia', 'anguillaraloc pratoviale', 'anguillaraloc pratoviale rm',
+    'anguillaraloc pratoviale anguillara sabazia rm', 'a'
+]);
+
+function filterCleanAliases(rawAliases) {
+    const list = Array.isArray(rawAliases)
         ? rawAliases.map(x => String(x || '').trim()).filter(Boolean)
         : String(rawAliases || '')
             .split(/[\n;,]+/)
             .map(x => x.trim())
             .filter(Boolean);
+    const seen = new Set();
+    const out = [];
+    list.forEach(item => {
+        const str = String(item || '').trim();
+        const norm = normalizeText(str);
+        if (!norm || norm.length < 3 || CITY_ONLY_ALIAS_BLACKLIST.has(norm) || seen.has(norm)) {
+            return;
+        }
+        seen.add(norm);
+        out.push(str);
+    });
+    return out;
+}
+
+function normalizeLuogo(item) {
+    const raw = item || {};
+    const nome = String(pickFirst(raw, ['nome', 'Nome', 'name', 'Name'])).trim();
+    const latRaw = pickFirst(raw, ['lat', 'latitude', 'Latitude']);
+    const lngRaw = pickFirst(raw, ['lng', 'lon', 'longitude', 'Longitude']);
+    const lat = Number(latRaw);
+    const lng = Number(lngRaw);
+    const rawAliases = pickFirst(raw, ['aliases', 'Aliases', 'alias']);
+    const aliases = filterCleanAliases(rawAliases);
     const rawDesignazione = pickFirst(raw, ['designazioneS4y', 'designazioneKey', 'designazioneKeys', 's4y']);
     const designazioneRawList = Array.isArray(rawDesignazione)
         ? rawDesignazione.map(x => String(x || '').trim()).filter(Boolean)
@@ -381,8 +419,8 @@ function normalizeLuogo(item) {
         seenDesignazione.add(key);
         designazioneS4y.push(value);
     });
-    return {
-        nome: String(pickFirst(raw, ['nome', 'Nome', 'name', 'Name'])).trim(),
+    const normalized = {
+        nome,
         indirizzo: String(pickFirst(raw, ['indirizzo', 'Indirizzo', 'address', 'Address'])).trim(),
         mapsUrl: String(pickFirst(raw, ['mapsUrl', 'MapsUrl', 'mapsURL', 'maps', 'map', 'url', 'Url'])).trim(),
         logoUrl: String(pickFirst(raw, ['logoUrl', 'LogoUrl', 'logoURL', 'logo', 'Logo'])).trim(),
@@ -392,6 +430,180 @@ function normalizeLuogo(item) {
         designazioneS4y,
         fatto: true
     };
+    const team = String(raw.team || '').trim();
+    const comune = String(raw.comune || '').trim();
+    if (team) normalized.team = team;
+    if (comune) normalized.comune = comune;
+    return normalized;
+}
+
+function repairCorruptedLuoghiDatabase(rawList) {
+    const input = Array.isArray(rawList) ? rawList.filter(Boolean).map(x => ({ ...x })) : [];
+    let changed = false;
+    const out = [];
+
+    for (const item of input) {
+        const nomeNorm = normalizeText(item.nome || '');
+        const lat = Number(item.lat);
+        const lng = Number(item.lng);
+
+        if (!item.fatto) {
+            const isOutOfLazio = Number.isFinite(lat) && Number.isFinite(lng) && (lat < 41.0 || lat > 42.9 || lng < 11.3 || lng > 14.0);
+            const isDuplicateOfExisting =
+                nomeNorm.includes('salvo d acquisto') ||
+                nomeNorm.includes('sale angelo') ||
+                nomeNorm.includes('capparella ferdinando') ||
+                nomeNorm.includes('rossi vincenzo') ||
+                nomeNorm.includes('fontana angelo');
+            if (isOutOfLazio || isDuplicateOfExisting) {
+                changed = true;
+                continue;
+            }
+            if (nomeNorm.includes('virtus marina') && nomeNorm.includes('lombardi')) {
+                if (item.nome !== 'Virtus Marina di San Nicola | A. Lombardi') {
+                    item.nome = 'Virtus Marina di San Nicola | A. Lombardi';
+                    item.team = 'Virtus Marina di San Nicola';
+                    item.comune = 'Marina di San Nicola';
+                    item.indirizzo = 'Via della Luna, Marina di San Nicola RM';
+                    changed = true;
+                }
+            }
+        }
+
+        if (nomeNorm.includes('leocon') && nomeNorm.includes('di ianne')) {
+            if (nomeNorm.includes('dopolavoro') || nomeNorm.includes('civitavecchia calcio')) {
+                item.nome = 'Leocon / Evergreen | Di Ianne Luca';
+                item.team = 'Leocon / Evergreen';
+                item.logoUrl = 'https://www.tuttocampo.it/Lazio/TerzaCategoria/GironeARoma/Squadra/Leocon/1204237/Scheda, https://www.tuttocampo.it/Lazio/SecondaCategoria/GironeC/Squadra/EvergreenCivitavecchia/1244966/Scheda';
+                item.designazioneS4y = ["a CIVITAVECCHIA (RM) sull'impianto DI IANNE LUCA SINTEX sito in VIA GIULIO BIANCONE SNC"];
+                item.aliases = [
+                    'LEOCON',
+                    'EVERGREEN CIVITAVECCHIA',
+                    'DI IANNE LUCA SINTEX',
+                    'VIA GIULIO BIANCONE SNC',
+                    'CIVITAVECCHIA (RM), DI IANNE LUCA SINTEX, VIA GIULIO BIANCONE SNC'
+                ];
+                changed = true;
+            }
+        }
+
+        if (nomeNorm.startsWith('tarquinia') && nomeNorm.includes('dopolavoro')) {
+            item.nome = 'Tarquinia';
+            item.team = '';
+            item.logoUrl = 'https://www.tuttocampo.it/Lazio/Promozione/GironeA/Squadra/TarquiniaCalcio/932915/Scheda';
+            item.aliases = [
+                'TARQUINIA CALCIO',
+                'BONELLI LIVIANO SINTEX',
+                'VIA RAFFAELLO SANZIO SNC',
+                'TARQUINIA (VT), BONELLI LIVIANO SINTEX, VIA RAFFAELLO SANZIO SNC'
+            ];
+            changed = true;
+        }
+
+        if (nomeNorm.includes('citta di cerveteri') && nomeNorm.includes('enrico galli') && nomeNorm.includes('dm 84')) {
+            item.nome = 'Città di Cerveteri | Enrico Galli';
+            item.team = '';
+            item.logoUrl = 'https://www.tuttocampo.it/Lazio/Promozione/GironeA/Squadra/CittadiCerveteri/77986/Scheda';
+            item.designazioneS4y = ["a CERVETERI (RM) sull'impianto GALLI ENRICO A SINTEX sito in VIA SETTEVENEPALO"];
+            item.aliases = [
+                'CITTA DI CERVETERI',
+                'GALLI ENRICO A SINTEX',
+                'VIA SETTEVENEPALO',
+                'CERVETERI (RM), GALLI ENRICO A SINTEX, VIA SETTEVENEPALO'
+            ];
+            changed = true;
+        }
+
+        if (nomeNorm.includes('borgo pallidoro') || (nomeNorm === 'borgo palidoro')) {
+            const wantS4y = [
+                "a PALIDORO (RM) sull'impianto FONTANA ANGELO A ERBA sito in VIA FILIPPO CUGGIANI 21/23",
+                "a PALIDORO (RM) sull'impianto FONTANA ANGELO A TERRA sito in VIA FILIPPO CUGGIANI 21/23",
+                "a PALIDORO - LADISPOLI (RM) sull'impianto FONTANA ANGELO A TERRA sito in VIA FILIPPO CUGGIANI 21/23"
+            ];
+            if (!Array.isArray(item.designazioneS4y) || !item.designazioneS4y.length) {
+                item.designazioneS4y = wantS4y;
+                item.comune = item.comune || 'Palidoro';
+                item.aliases = ['BORGO PALIDORO', 'FONTANA ANGELO A TERRA', 'VIA FILIPPO CUGGIANI 21/23'];
+                changed = true;
+            }
+        } else if (nomeNorm.includes('campo di anguillara') || nomeNorm.includes('ferdinando capparella')) {
+            if (!Array.isArray(item.designazioneS4y) || !item.designazioneS4y.length) {
+                item.designazioneS4y = [
+                    "a ANGUILLARALOC.PRATOVIALE (RM) sull'impianto CAPPARELLA FERDINANDO A ERBA sito in STR.VICINALE DEI VIGNALI",
+                    "a ANGUILLARALOC.PRATOVIALE - ANGUILLARA SABAZIA (RM) sull'impianto CAPPARELLA FERDINANDO A ERBA sito in STR.VICINALE DEI VIGNALI"
+                ];
+                item.comune = item.comune || 'Anguillara Sabazia';
+                item.aliases = ['ANGUILLARA CALCIO', 'CAPPARELLA FERDINANDO A ERBA', 'STR.VICINALE DEI VIGNALI'];
+                changed = true;
+            }
+        } else if (nomeNorm.includes('tamagnini vittorio')) {
+            if (!Array.isArray(item.designazioneS4y) || !item.designazioneS4y.length) {
+                item.designazioneS4y = [
+                    "a CIVITAVECCHIA CAMPO DELL''ORO (RM) sull'impianto TAMAGNINI VITTORIO SINTEX sito in LARGO MARTIRI DI VIA FANI SNC"
+                ];
+                item.comune = item.comune || 'Civitavecchia';
+                item.aliases = ['CIVITAVECCHIA CALCIO 1920', 'QUARTIERE CAMPO DELL ORO', 'TAMAGNINI VITTORIO SINTEX', 'LARGO MARTIRI DI VIA FANI SNC'];
+                changed = true;
+            }
+        } else if (nomeNorm.includes('dopolavoro ferroviario')) {
+            if (!Array.isArray(item.designazioneS4y) || !item.designazioneS4y.length) {
+                item.designazioneS4y = [
+                    "a CIVITAVECCHIA (RM) sull'impianto DOPOLAVORO FERROVIARIO SINTEX sito in VIA BACCELLI"
+                ];
+                item.comune = item.comune || 'Civitavecchia';
+                item.aliases = ['DOPOLAVORO FOOTBALL CLUB', 'CSL SOCCER 21 8.0', 'DOPOLAVORO FERROVIARIO SINTEX', 'VIA BACCELLI'];
+                changed = true;
+            }
+        } else if (nomeNorm.includes('accademy ladispoli') || nomeNorm === 'academy ladispoli') {
+            if (!Array.isArray(item.designazioneS4y) || !item.designazioneS4y.length) {
+                item.designazioneS4y = [
+                    "a LADISPOLI CAMPI DI VACCINA SNC (RM) sull'impianto SALE ANGELO SINTEX sito in CAMPI DI VACCINA SNC"
+                ];
+                item.comune = item.comune || 'Ladispoli';
+                item.aliases = ['ACADEMY LADISPOLI SRL', 'SALE ANGELO SINTEX', 'CAMPI DI VACCINA SNC'];
+                changed = true;
+            }
+        } else if (nomeNorm.includes('daniele mataloni')) {
+            if (!Array.isArray(item.designazioneS4y) || !item.designazioneS4y.length) {
+                item.designazioneS4y = [
+                    "a CERVETERI DUE CASETTE (RM) sull'impianto COMUNALE DANIELE MATALONI sito in VIA DELLE PISCINE 36"
+                ];
+                item.comune = item.comune || 'Cerveteri';
+                item.aliases = ['DM 84 CERVETERI', 'COMUNALE DANIELE MATALONI', 'VIA DELLE PISCINE 36'];
+                changed = true;
+            }
+        } else if (nomeNorm === 'club calcio passoscuro') {
+            if (!Array.isArray(item.designazioneS4y) || !item.designazioneS4y.length) {
+                item.designazioneS4y = [
+                    "a PASSOSCURO (RM) sull'impianto SALVO D''ACQUISTO A ERBA sito in VIA S.CARLO A PALIDORO 360"
+                ];
+                item.comune = item.comune || 'Passoscuro';
+                item.aliases = ['CLUB CALCIO PASSOSCURO', 'SALVO D ACQUISTO A ERBA', 'VIA S.CARLO A PALIDORO 360'];
+                changed = true;
+            }
+        } else if (nomeNorm === 'viterbese') {
+            if (!Array.isArray(item.designazioneS4y) || !item.designazioneS4y.length) {
+                item.designazioneS4y = [
+                    "a VITERBO PILASTRO (VT) sull'impianto ROSSI VINCENZO SINTEX sito in VIA CARLO MINCIOTTI N. 4"
+                ];
+                item.comune = item.comune || 'Viterbo';
+                item.aliases = ['VITERBESE S.S.D. A R.L.', 'ROSSI VINCENZO SINTEX', 'VIA CARLO MINCIOTTI N. 4'];
+                changed = true;
+            }
+        }
+
+        if (Array.isArray(item.aliases)) {
+            const cleanedAliases = filterCleanAliases(item.aliases);
+            if (cleanedAliases.length !== item.aliases.length) {
+                item.aliases = cleanedAliases;
+                changed = true;
+            }
+        }
+
+        out.push(normalizeLuogo(item));
+    }
+
+    return { cleaned: out, list: out, changed };
 }
 
 function normalizePayment(item) {
@@ -575,7 +787,9 @@ function restoreDrafts() {
 
     try {
         const rawLuoghi = JSON.parse(localStorage.getItem(LUOGHI_DRAFT_KEY) || '[]');
-        luoghiItems = Array.isArray(rawLuoghi) ? rawLuoghi.map(normalizeLuogo) : [];
+        const normalizedDraft = Array.isArray(rawLuoghi) ? rawLuoghi.map(normalizeLuogo) : [];
+        const { cleaned } = repairCorruptedLuoghiDatabase(normalizedDraft);
+        luoghiItems = cleaned;
     } catch {
         luoghiItems = [];
     }
@@ -923,7 +1137,17 @@ function validateLuogoForm() {
         lng = Number.isFinite(existingLng) ? existingLng : null;
     }
 
-    return { nome, indirizzo, mapsUrl, logoUrl, designazioneS4y, lat, lng };
+    const existing = (editLuogoIndex >= 0 && luoghiItems[editLuogoIndex]) ? luoghiItems[editLuogoIndex] : {};
+    return normalizeLuogo({
+        ...existing,
+        nome,
+        indirizzo,
+        mapsUrl,
+        logoUrl,
+        designazioneS4y,
+        lat,
+        lng
+    });
 }
 
 function addPaymentRow() {
@@ -1343,6 +1567,7 @@ function handleSaveNews() {
     saveNewsDraft();
     renderAll();
     resetNewsForm();
+    publishNewsFirebase();
 }
 
 function handleSaveLuogo() {
@@ -1365,6 +1590,7 @@ function handleSaveLuogo() {
     saveLuoghiDraft();
     renderAll();
     resetLuogoForm();
+    publishLuoghiFirebase();
 }
 
 async function publishNewsFirebase() {
@@ -1448,6 +1674,8 @@ async function publishLuoghiFirebase() {
     }
 }
 
+let pendingLuoghiRepairSync = false;
+
 async function loadLuoghiFromFirebase(silent = false) {
     const fb = getFirebaseState();
     if (!fb.ready || !fb.db) {
@@ -1461,9 +1689,18 @@ async function loadLuoghiFromFirebase(silent = false) {
         const snap = await fb.db.ref('luoghi').once('value');
         const raw = snap.exists() ? snap.val() : [];
         const fromDb = Array.isArray(raw) ? raw : Object.values(raw || {});
-        luoghiItems = fromDb.map(normalizeLuogo);
+        const { cleaned, changed } = repairCorruptedLuoghiDatabase(fromDb);
+        luoghiItems = cleaned;
         saveLuoghiDraft();
         renderAll();
+        if (changed) {
+            if (fb.auth?.currentUser && isPublisherAdmin(fb.auth.currentUser)) {
+                fb.db.ref('luoghi').set(luoghiItems.map(normalizeLuogo)).catch(() => {});
+                pendingLuoghiRepairSync = false;
+            } else {
+                pendingLuoghiRepairSync = true;
+            }
+        }
         if (!silent) {
             setLuoghiStatus('Luoghi caricati da Firebase.', 'ok');
         }
@@ -1572,6 +1809,10 @@ function bindAuthState() {
         if (user && isAdmin) {
             const label = String(profile?.nickname || user.displayName || user.email || '').trim();
             setAuthStatus(`Autenticato admin: ${label}`, true);
+            if (pendingLuoghiRepairSync && fb.db && luoghiItems.length) {
+                pendingLuoghiRepairSync = false;
+                fb.db.ref('luoghi').set(luoghiItems.map(normalizeLuogo)).catch(() => {});
+            }
         } else if (user) {
             const label = String(profile?.nickname || user.displayName || user.email || '').trim();
             setAuthStatus(`Accesso negato per ${label}`, false);
@@ -1856,6 +2097,8 @@ newsList.addEventListener('click', event => {
 
     if (target.dataset.action === 'edit-news') {
         fillNewsForm(index);
+        titleInput?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        titleInput?.focus();
     }
 
     if (target.dataset.action === 'delete-news') {
@@ -1863,6 +2106,7 @@ newsList.addEventListener('click', event => {
         saveNewsDraft();
         renderAll();
         setStatus('News eliminata.', 'ok');
+        publishNewsFirebase();
     }
 });
 
@@ -1883,6 +2127,8 @@ luoghiList.addEventListener('click', event => {
 
     if (target.dataset.action === 'edit-luogo') {
         fillLuogoForm(index);
+        luogoNomeInput?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        luogoNomeInput?.focus();
     }
 
     if (target.dataset.action === 'delete-luogo') {
@@ -1890,8 +2136,16 @@ luoghiList.addEventListener('click', event => {
         saveLuoghiDraft();
         renderAll();
         setLuoghiStatus('Luogo eliminato.', 'ok');
+        publishLuoghiFirebase();
     }
 });
+
+const scheduleAutoPublishPayments = debounce(() => {
+    const fb = getFirebaseState();
+    if (fb.ready && fb.auth?.currentUser && isPublisherAdmin(fb.auth.currentUser)) {
+        publishPaymentsFirebase();
+    }
+}, 900);
 
 if (paymentsSheetBody) {
     paymentsSheetBody.addEventListener('click', event => {
@@ -1928,7 +2182,8 @@ if (paymentsSheetBody) {
         }
         paymentsItems[index][field] = String(cell.textContent || '').trim();
         savePaymentsDraft();
-        setPaymentsStatus('Bozza pagamenti aggiornata.', 'ok');
+        setPaymentsStatus('Bozza aggiornata (salvataggio automatico in corso...).', 'ok');
+        scheduleAutoPublishPayments();
     });
 
     paymentsSheetBody.addEventListener('paste', event => {
@@ -1962,7 +2217,8 @@ if (paymentsSheetHead) {
         }
         paymentsColumns[key] = String(cell.textContent || '').trim() || normalizePaymentColumns({})[key];
         savePaymentsDraft();
-        setPaymentsStatus('Nome colonna aggiornato.', 'ok');
+        setPaymentsStatus('Nome colonna aggiornato (salvataggio automatico in corso...).', 'ok');
+        scheduleAutoPublishPayments();
     });
 }
 

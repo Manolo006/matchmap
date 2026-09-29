@@ -1,8 +1,11 @@
-const CACHE_NAME = 'matchmap-v5';
+const CACHE_NAME = 'matchmap-v9';
 const CORE_ASSETS = [
   './',
   './index.html',
   './style.css',
+  './js/shared-utils.js',
+  './js/luoghi-map.js',
+  './js/gmail-designazioni.js',
   './script.js',
   './firebase-config.js',
   './publisher.html',

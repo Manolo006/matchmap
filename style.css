@@ -2292,7 +2292,36 @@ a:hover {
 .dashboard-csv-actions {
     display: inline-flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
+}
+
+.dashboard-search-input {
+    width: clamp(200px, 26vw, 280px);
+    margin: 0;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    border-radius: 10px;
+    background: rgba(12, 22, 42, 0.9);
+    border: 1px solid rgba(130, 167, 255, 0.28);
+    color: var(--text);
+}
+
+.dashboard-search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(76, 201, 240, 0.18);
+}
+
+.paste-quick-btn {
+    background: linear-gradient(135deg, rgba(110, 231, 183, 0.22), rgba(76, 201, 240, 0.22));
+    color: #e8edff;
+    border: 1px solid rgba(110, 231, 183, 0.45);
+}
+
+.paste-quick-btn:hover {
+    background: linear-gradient(135deg, rgba(110, 231, 183, 0.34), rgba(76, 201, 240, 0.34));
+    border-color: rgba(110, 231, 183, 0.75);
 }
 
 .csv-action-btn {
@@ -2331,6 +2360,10 @@ a:hover {
     }
     .dashboard-csv-actions {
         width: 100%;
+    }
+    .dashboard-search-input {
+        width: 100%;
+        flex: 1 1 100%;
     }
     .csv-action-btn {
         flex: 1;

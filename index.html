@@ -11,8 +11,8 @@
 <link rel="icon" type="image/png" href="img/logo.png">
 <link rel="apple-touch-icon" href="img/logo.png">
 <link rel="manifest" href="manifest.webmanifest">
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
 <link rel="stylesheet" href="style.css">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 </head>
 <body>
 <div class="background-glow"></div>
@@ -73,6 +73,7 @@
             <textarea id="designazione" placeholder="Incolla qui la designazione"></textarea>
             <div class="input-actions-row">
                 <button class="primary-btn" onclick="aggiungiEvento()">Aggiungi Evento</button>
+                <button class="primary-btn paste-quick-btn" type="button" onclick="incollaEAggiungiEvento()" title="Incolla dagli appunti e aggiungi subito la designazione con 1 click">📋 Incolla e Aggiungi</button>
                 <button id="gmailAutoSyncBtn" class="primary-btn gmail-quick-sync-btn" type="button" onclick="autoSyncGmailDesignazioni()" title="Sincronizza automaticamente le designazioni ricevute da tutte le sezioni AIA via Gmail">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg>
                     <span>Sincronizza Gmail</span>
@@ -116,6 +117,7 @@
             <div class="table-header-row">
                 <h2>Eventi inseriti</h2>
                 <div class="dashboard-csv-actions">
+                    <input id="dashboardSearchInput" type="search" class="dashboard-search-input" placeholder="🔍 Cerca squadra, campo o data..." autocomplete="off">
                     <button id="dashboardExportCsvBtn" class="csv-action-btn" type="button" onclick="exportDashboardEventsToCsv()" title="Esporta le partite in formato CSV / Excel">
                         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"></path></svg>
                         <span>Esporta CSV</span>
@@ -247,8 +249,10 @@
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-database-compat.js"></script>
 <script src="https://accounts.google.com/gsi/client" async defer></script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script src="firebase-config.js"></script>
+<script src="js/shared-utils.js"></script>
+<script src="js/luoghi-map.js"></script>
+<script src="js/gmail-designazioni.js"></script>
 <script src="script.js"></script>
 </body>
 </html>
