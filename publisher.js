@@ -1061,8 +1061,7 @@ async function fetchTuttocampoTeamCandidates(searchValue, regionName = TUTTOCAMP
     const response = await fetch(`${TUTTOCAMPO_TEAM_SEARCH_URL}?${params.toString()}`, {
         method: 'GET',
         headers: {
-            Accept: 'application/json, text/javascript, */*; q=0.01',
-            'X-Requested-With': 'XMLHttpRequest'
+            Accept: 'application/json, text/javascript, */*; q=0.01'
         }
     });
     if (!response.ok) {
@@ -1093,7 +1092,7 @@ async function fetchTuttocampoTeamCandidates(searchValue, regionName = TUTTOCAMP
 }
 
 async function resolveTuttocampoLogoUrlForLuogo(item) {
-    const originalName = String(item?.nome || '').trim();
+    const originalName = String(item?.nome || '').split('|')[0].trim();
     const normalizedName = normalizeText(originalName);
     if (!normalizedName) {
         return '';
@@ -1109,7 +1108,18 @@ async function resolveTuttocampoLogoUrlForLuogo(item) {
         return '';
     }
 
-    const candidates = await fetchTuttocampoTeamCandidates(searchValue, TUTTOCAMPO_DEFAULT_REGION);
+    const withAccents = searchValue
+        .replace(/\bcitta\b/gi, 'Città')
+        .replace(/\bsocieta\b/gi, 'Società');
+    const queries = Array.from(new Set([withAccents, searchValue]));
+
+    let candidates = [];
+    for (const q of queries) {
+        candidates = await fetchTuttocampoTeamCandidates(q, TUTTOCAMPO_DEFAULT_REGION);
+        if (candidates.length) {
+            break;
+        }
+    }
     if (!candidates.length) {
         return '';
     }

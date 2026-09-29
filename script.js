@@ -21,22 +21,105 @@ let mapSearchLastEnterTs = 0;
 let deferredInstallPrompt = null;
 const TEAM_LOGO_FALLBACK_PATH = 'img/logo.png';
 const teamLogoUrlCache = new Map();
+const DYNAMIC_TEAM_LOGO_CACHE_KEY = 'matchmap_dynamic_team_logos_v1';
+const ENRICHED_LUOGHI_CACHE_KEY = 'matchmap_enriched_luoghi_v1';
+const TUTTOCAMPO_TEAM_SEARCH_URL = 'https://www.tuttocampo.it/Ajax/GetTeams';
 const DASHBOARD_ADMIN_EMAILS = new Set(['manuelcarpita@gmail.com']);
 const AUTO_FIELD_SUGGESTIONS_CACHE_KEY = 'matchmap_auto_field_suggestions_v1';
 const DASHBOARD_AUTH_SNAPSHOT_KEY = 'matchmap_dashboard_auth_snapshot_v1';
 const GMAIL_INTEGRATION_STORAGE_KEY = 'matchmap_gmail_integration_v1';
 const GMAIL_READONLY_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
-const GMAIL_DEFAULT_QUERY = '(from:(aia OR "aia-figc.it" OR cra OR sinfonia4you OR servizisportivi OR designazioni) OR to:(aia OR "aia-figc.it") OR subject:(designazione OR "notifica di designazione" OR "sei designato" OR "gara n.")) -subject:(riunione OR assemblea OR convocazione OR polo OR quota OR circolare OR auguri OR cena) newer_than:365d';
-const GMAIL_FALLBACK_QUERY = '("notifica di designazione" OR designazione OR "sei designato" OR "numero gara" OR "gara :") -subject:(riunione OR assemblea OR convocazione OR polo OR quota OR circolare) newer_than:365d';
+const GMAIL_DEFAULT_QUERY = '(from:(aia OR "aia-figc.it" OR cra OR sinfonia4you OR servizisportivi OR designazioni) OR to:(aia OR "aia-figc.it") OR subject:(designazione OR "notifica di designazione" OR "sei designato" OR "gara n.")) -subject:(riunione OR assemblea OR convocazione OR polo OR quota OR circolare OR auguri OR cena) newer_than:730d';
+const GMAIL_FALLBACK_QUERY = '("notifica di designazione" OR designazione OR "sei designato" OR "numero gara" OR "gara :") -subject:(riunione OR assemblea OR convocazione OR polo OR quota OR circolare) newer_than:730d';
+
+function readEnrichedLuoghiCache() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(ENRICHED_LUOGHI_CACHE_KEY) || '[]');
+        return Array.isArray(raw) ? raw : [];
+    } catch {
+        return [];
+    }
+}
+
+function writeEnrichedLuoghiCache(list) {
+    try {
+        if (Array.isArray(list) && list.length) {
+            localStorage.setItem(ENRICHED_LUOGHI_CACHE_KEY, JSON.stringify(list));
+        }
+    } catch {
+        // ignore storage quota errors
+    }
+}
+
+function mergeLuoghiLists(remoteList, cachedList) {
+    const base = Array.isArray(remoteList) ? remoteList.map(x => ({ ...x })) : [];
+    const extra = Array.isArray(cachedList) ? cachedList : [];
+    if (!extra.length) {
+        return base;
+    }
+
+    extra.forEach(cached => {
+        if (!cached || typeof cached !== 'object') {
+            return;
+        }
+        const cachedNome = normalizeText(cached.nome || '');
+        const cachedIndirizzo = normalizeText(cached.indirizzo || '');
+        const existingIdx = base.findIndex(item => {
+            const itemNome = normalizeText(item?.nome || '');
+            const itemInd = normalizeText(item?.indirizzo || '');
+            return (cachedNome && itemNome === cachedNome)
+                || (cachedIndirizzo && cachedIndirizzo.length >= 8 && itemInd === cachedIndirizzo);
+        });
+
+        if (existingIdx >= 0) {
+            const existing = base[existingIdx];
+            const existingLogos = String(existing.logoUrl || existing.logo || '').split(/[,;\n]+/).map(x => x.trim()).filter(Boolean);
+            const cachedLogos = String(cached.logoUrl || cached.logo || '').split(/[,;\n]+/).map(x => x.trim()).filter(Boolean);
+            cachedLogos.forEach(l => {
+                if (l && !existingLogos.includes(l)) {
+                    existingLogos.push(l);
+                }
+            });
+            const mergedAliases = Array.from(new Set([
+                ...(Array.isArray(existing.aliases) ? existing.aliases : []),
+                ...(Array.isArray(cached.aliases) ? cached.aliases : [])
+            ].map(x => String(x || '').trim()).filter(Boolean)));
+            const mergedS4y = Array.from(new Set([
+                ...(Array.isArray(existing.designazioneS4y) ? existing.designazioneS4y : (existing.designazioneS4y ? [existing.designazioneS4y] : [])),
+                ...(Array.isArray(cached.designazioneS4y) ? cached.designazioneS4y : (cached.designazioneS4y ? [cached.designazioneS4y] : []))
+            ].map(x => String(x || '').trim()).filter(Boolean)));
+
+            base[existingIdx] = {
+                ...existing,
+                nome: (String(cached.nome || '').length > String(existing.nome || '').length) ? cached.nome : existing.nome,
+                team: (String(cached.team || '').length > String(existing.team || '').length) ? cached.team : (existing.team || cached.team || ''),
+                comune: existing.comune || cached.comune || '',
+                indirizzo: existing.indirizzo || cached.indirizzo || '',
+                lat: hasValidMapCoords(existing.lat, existing.lng) ? existing.lat : cached.lat,
+                lng: hasValidMapCoords(existing.lat, existing.lng) ? existing.lng : cached.lng,
+                mapsUrl: existing.mapsUrl || cached.mapsUrl || '',
+                logoUrl: existingLogos.join(', '),
+                aliases: mergedAliases,
+                designazioneS4y: mergedS4y
+            };
+        } else {
+            base.push({ ...cached });
+        }
+    });
+
+    return base;
+}
 
 async function loadLuoghiDb() {
+    const cachedEnriched = readEnrichedLuoghiCache();
     try {
         const fb = window.matchMapFirebase;
         if (fb?.ready && fb.db) {
             const snap = await fb.db.ref('luoghi').once('value');
             if (snap.exists()) {
                 const raw = snap.val();
-                luoghiDb = Array.isArray(raw) ? raw : Object.values(raw || {});
+                const remoteList = Array.isArray(raw) ? raw : Object.values(raw || {});
+                luoghiDb = mergeLuoghiLists(remoteList, cachedEnriched);
                 renderLuoghiMap();
                 renderMapSearchSuggestions();
                 if (dashboardEvents.length) {
@@ -45,11 +128,13 @@ async function loadLuoghiDb() {
                 if (gmailPreviewItems.length) {
                     renderGmailPreviewList();
                 }
+                scheduleAutoSyncRefereedMatches();
                 return;
             }
         }
+        luoghiDb = cachedEnriched;
     } catch (error) {
-        luoghiDb = [];
+        luoghiDb = cachedEnriched;
     }
 }
 
@@ -684,12 +769,17 @@ function setGmailStatus(message, isOk = false) {
     statusEl.style.color = isOk ? '#6ee7b7' : '#9fb2dd';
 }
 
+function upgradeGmailQueryWindow(rawQuery) {
+    const q = String(rawQuery || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY;
+    return q.replace(/\bnewer_than:(?:180|365)d\b/gi, 'newer_than:730d');
+}
+
 function readGmailIntegrationPrefs() {
     try {
         const raw = JSON.parse(localStorage.getItem(GMAIL_INTEGRATION_STORAGE_KEY) || '{}');
         return {
             enabled: Boolean(raw?.enabled),
-            query: String(raw?.query || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY,
+            query: upgradeGmailQueryWindow(raw?.query),
             linkedEmail: String(raw?.linkedEmail || '').trim(),
             updatedAt: Number(raw?.updatedAt || 0)
         };
@@ -706,7 +796,7 @@ function readGmailIntegrationPrefs() {
 function writeGmailIntegrationPrefsLocal() {
     localStorage.setItem(GMAIL_INTEGRATION_STORAGE_KEY, JSON.stringify({
         enabled: Boolean(gmailIntegrationPrefs?.enabled),
-        query: String(gmailIntegrationPrefs?.query || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY,
+        query: upgradeGmailQueryWindow(gmailIntegrationPrefs?.query),
         linkedEmail: String(gmailIntegrationPrefs?.linkedEmail || '').trim(),
         updatedAt: Date.now()
     }));
@@ -722,7 +812,7 @@ async function persistGmailIntegrationPrefs() {
     try {
         await fb.db.ref(`users/${user.uid}/integrations/gmail`).set({
             enabled: Boolean(gmailIntegrationPrefs?.enabled),
-            query: String(gmailIntegrationPrefs?.query || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY,
+            query: upgradeGmailQueryWindow(gmailIntegrationPrefs?.query),
             linkedEmail: String(gmailIntegrationPrefs?.linkedEmail || '').trim(),
             updatedAt: Date.now()
         });
@@ -743,7 +833,7 @@ async function loadGmailIntegrationPrefsForCurrentUser() {
                 const cloud = snap.val() || {};
                 merged = {
                     enabled: Boolean(cloud?.enabled),
-                    query: String(cloud?.query || local.query || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY,
+                    query: upgradeGmailQueryWindow(cloud?.query || local.query),
                     linkedEmail: String(cloud?.linkedEmail || local.linkedEmail || '').trim(),
                     updatedAt: Number(cloud?.updatedAt || local.updatedAt || 0)
                 };
@@ -755,7 +845,7 @@ async function loadGmailIntegrationPrefsForCurrentUser() {
 
     gmailIntegrationPrefs = {
         enabled: Boolean(merged.enabled),
-        query: String(merged.query || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY,
+        query: upgradeGmailQueryWindow(merged.query),
         linkedEmail: String(merged.linkedEmail || '').trim(),
         updatedAt: Number(merged.updatedAt || 0)
     };
@@ -1158,8 +1248,40 @@ function splitMatchTeams(squadreText) {
 
 const GENERIC_TEAM_LOGO_WORDS = new Set([
     'calcio', 'football', 'club', 'asd', 'ssd', 'usd', 'pol', 'polisportiva',
-    'sporting', 'citta', 'campo', 'ac', 'fc', 'as', 'ss', 'us', 'di', 'del', 'della'
+    'sporting', 'citta', 'campo', 'ac', 'fc', 'as', 'ss', 'us', 'di', 'del', 'della',
+    'san', 'santa', 'sant', 'nuova', 'real', 'vis', 'pro', 'academy', 'scuola',
+    'giovanili', 'boys', 'atletico', 'virtus', 'unione', 'sportiva', 'calcistica',
+    'dilettantistica', 'associazione', 'giovanile', 'soccer', 'team', 'united'
 ]);
+
+let dynamicTeamLogoCache = (() => {
+    try {
+        const raw = JSON.parse(localStorage.getItem(DYNAMIC_TEAM_LOGO_CACHE_KEY) || '{}');
+        return (raw && typeof raw === 'object') ? raw : {};
+    } catch {
+        return {};
+    }
+})();
+const pendingTeamLogoLookups = new Set();
+let autoSyncRefereedTimer = null;
+let isAutoSyncingRefereedMatches = false;
+
+function saveDynamicTeamLogoCache() {
+    try {
+        localStorage.setItem(DYNAMIC_TEAM_LOGO_CACHE_KEY, JSON.stringify(dynamicTeamLogoCache));
+    } catch {
+        // ignore storage quota errors
+    }
+}
+
+const debouncedRefreshTeamLogosUi = debounce(() => {
+    if (dashboardEvents.length) {
+        renderDashboardEvents();
+    }
+    if (gmailPreviewItems.length) {
+        renderGmailPreviewList();
+    }
+}, 220);
 
 function extractTuttocampoTeamSlug(rawUrl) {
     const match = String(rawUrl || '').match(/\/Squadra\/([^/]+)\/\d+/i);
@@ -1199,9 +1321,9 @@ function scoreTeamLabelMatch(teamName, candidateLabel) {
     const candTokens = normCand.split(' ').filter(t => t.length >= 3 && !GENERIC_TEAM_LOGO_WORDS.has(t));
     targetTokens.forEach(token => {
         if (candTokens.includes(token)) {
-            score += 45;
+            score += 55;
         } else if (token.length >= 4 && candTokens.some(ct => ct.length >= 4 && (ct.includes(token) || token.includes(ct)))) {
-            score += 25;
+            score += 30;
         }
     });
 
@@ -1224,7 +1346,7 @@ function extractLogoCandidateFromLuogo(entry, teamName = '') {
         return tuttocampoCandidates[0] || urlPart;
     };
 
-    if (parts.length === 1 || !String(teamName || '').trim()) {
+    if (!String(teamName || '').trim()) {
         return resolveSingleUrl(parts[0]);
     }
 
@@ -1237,9 +1359,21 @@ function extractLogoCandidateFromLuogo(entry, teamName = '') {
     const bestMatchingSegment = nameSegments
         .map(seg => ({ seg, score: scoreTeamLabelMatch(teamName, seg) }))
         .sort((a, b) => b.score - a.score)[0];
-    const effectiveSegment = (bestMatchingSegment && bestMatchingSegment.score >= 45)
+    const effectiveSegment = (bestMatchingSegment && bestMatchingSegment.score >= 50)
         ? bestMatchingSegment.seg
         : '';
+
+    if (parts.length === 1) {
+        const singleSlug = extractTuttocampoTeamSlug(parts[0]);
+        if (singleSlug) {
+            const directScore = scoreTeamLabelMatch(teamName, singleSlug);
+            const segScore = effectiveSegment ? scoreTeamLabelMatch(effectiveSegment, singleSlug) : 0;
+            if (Math.max(directScore, segScore) < 45 && nameSegments.length <= 1) {
+                return '';
+            }
+        }
+        return resolveSingleUrl(parts[0]);
+    }
 
     let bestPart = parts[0];
     let bestScore = -1;
@@ -1303,7 +1437,214 @@ function findBestLogoEntryForTeam(teamName) {
         }
     });
 
-    return bestScore >= 45 ? best : null;
+    return bestScore >= 55 ? best : null;
+}
+
+function buildTuttocampoSearchQueries(rawTeamName) {
+    const cleaned = String(rawTeamName || '')
+        .replace(/^campo\s+(?:di|del|della)?\s*/i, '')
+        .replace(/\b(?:a\.?s\.?d\.?|s\.?s\.?d\.?|u\.?s\.?d\.?|p\.?o\.?l\.?|f\.?c\.?|a\.?c\.?|u\.?s\.?|s\.?s\.?|a\.?s\.?|s\.?r\.?l\.?)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (!cleaned || cleaned.length < 2) {
+        return [];
+    }
+
+    const withAccents = cleaned
+        .replace(/\bcitta\b/gi, 'Città')
+        .replace(/\bsocieta\b/gi, 'Società')
+        .replace(/\buniversita\b/gi, 'Università')
+        .replace(/\btrinita\b/gi, 'Trinità');
+
+    const distinctiveTokens = normalizeText(cleaned)
+        .split(' ')
+        .filter(t => t.length >= 3 && !GENERIC_TEAM_LOGO_WORDS.has(t));
+
+    const queries = [];
+    const pushUnique = q => {
+        const val = String(q || '').replace(/\s+/g, ' ').trim();
+        if (val.length >= 3 && !queries.some(x => x.toLowerCase() === val.toLowerCase())) {
+            queries.push(val);
+        }
+    };
+
+    pushUnique(withAccents);
+    pushUnique(cleaned);
+    if (distinctiveTokens.length) {
+        pushUnique(distinctiveTokens.join(' '));
+        const longest = [...distinctiveTokens].sort((a, b) => b.length - a.length)[0];
+        if (longest && longest.length >= 4) {
+            pushUnique(longest);
+        }
+    }
+    return queries.slice(0, 4);
+}
+
+async function queryTuttocampoAjax(searchValue, regionName = 'Lazio') {
+    const q = String(searchValue || '').trim();
+    if (!q) {
+        return [];
+    }
+    const params = new URLSearchParams({ search_value: q });
+    if (regionName) {
+        params.set('region_name', regionName);
+    }
+    try {
+        const response = await fetch(`${TUTTOCAMPO_TEAM_SEARCH_URL}?${params.toString()}`, {
+            method: 'GET',
+            headers: {
+                Accept: 'application/json, text/javascript, */*; q=0.01'
+            }
+        });
+        if (!response.ok) {
+            return [];
+        }
+        const payload = await response.json();
+        if (!Array.isArray(payload)) {
+            return [];
+        }
+        const out = [];
+        payload.forEach(group => {
+            const groupLabel = String(group?.text || '').trim();
+            const children = Array.isArray(group?.children) ? group.children : [];
+            children.forEach(child => {
+                const rawId = String(child?.id || '').trim().replace(/^\/+/, '');
+                if (!rawId) {
+                    return;
+                }
+                const teamId = extractTuttocampoTeamId(`/Squadra/${rawId}`);
+                const schedaUrl = `https://www.tuttocampo.it/${rawId}/Scheda`;
+                const logoUrl = teamId
+                    ? `https://b-content.tuttocampo.it/Teams/200/${teamId}.png?v=1`
+                    : '';
+                out.push({
+                    id: rawId,
+                    teamId,
+                    text: stripHtmlTags(child?.text || ''),
+                    groupLabel,
+                    schedaUrl,
+                    logoUrl
+                });
+            });
+        });
+        return out;
+    } catch {
+        return [];
+    }
+}
+
+async function fetchTuttocampoTeamInfo(teamName) {
+    const normKey = normalizeText(teamName);
+    if (!normKey || normKey.length < 2) {
+        return null;
+    }
+
+    const cached = dynamicTeamLogoCache[normKey];
+    if (cached && (cached.logoUrl || cached.notFound)) {
+        const ageMs = Date.now() - Number(cached.updatedAt || 0);
+        if (cached.logoUrl || ageMs < 24 * 60 * 60 * 1000) {
+            return cached.logoUrl ? cached : null;
+        }
+    }
+
+    const fromDb = findBestLogoEntryForTeam(teamName);
+    if (fromDb) {
+        const dbLogo = extractLogoCandidateFromLuogo(fromDb, teamName);
+        if (dbLogo) {
+            const rawParts = String(fromDb?.logoUrl || fromDb?.logo || '')
+                .split(/[,;\n]+/)
+                .map(x => x.trim())
+                .filter(Boolean);
+            const matchingScheda = rawParts.find(p => buildTuttocampoLogoCandidates(p).includes(dbLogo)) || dbLogo;
+            const entry = {
+                teamName: String(teamName).trim(),
+                logoUrl: dbLogo,
+                schedaUrl: matchingScheda,
+                updatedAt: Date.now()
+            };
+            dynamicTeamLogoCache[normKey] = entry;
+            saveDynamicTeamLogoCache();
+            return entry;
+        }
+    }
+
+    const queries = buildTuttocampoSearchQueries(teamName);
+    let bestCandidate = null;
+    let bestScore = 0;
+
+    for (const q of queries) {
+        const candidates = await queryTuttocampoAjax(q, 'Lazio');
+        candidates.forEach(cand => {
+            const cleanName = String(cand.text || '').split('(')[0].trim();
+            const slugName = extractTuttocampoTeamSlug(cand.schedaUrl);
+            let score = Math.max(
+                scoreTeamLabelMatch(teamName, cleanName),
+                scoreTeamLabelMatch(teamName, slugName)
+            );
+            if (cand.groupLabel === 'Dilettanti') {
+                score += 25;
+            } else if (cand.groupLabel === 'Giovanili') {
+                score += 15;
+            }
+            if (/eccellenza|promozione|prima categoria|seconda categoria|terza categoria|juniores|allievi|giovanissimi/i.test(cand.text)) {
+                score += 12;
+            }
+            if (/calcio a 5|calcio a 8|femminile|amatori/i.test(cand.text) && !/c5|calcio a 5|femminile/i.test(teamName)) {
+                score -= 75;
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                bestCandidate = cand;
+            }
+        });
+        if (bestScore >= 170) {
+            break;
+        }
+    }
+
+    if (bestCandidate && bestScore >= 55 && bestCandidate.logoUrl) {
+        const result = {
+            teamName: String(teamName).trim(),
+            matchedLabel: String(bestCandidate.text || '').split('(')[0].trim(),
+            logoUrl: bestCandidate.logoUrl,
+            schedaUrl: bestCandidate.schedaUrl || bestCandidate.logoUrl,
+            updatedAt: Date.now()
+        };
+        dynamicTeamLogoCache[normKey] = result;
+        saveDynamicTeamLogoCache();
+        return result;
+    }
+
+    dynamicTeamLogoCache[normKey] = {
+        teamName: String(teamName).trim(),
+        logoUrl: '',
+        notFound: true,
+        updatedAt: Date.now()
+    };
+    saveDynamicTeamLogoCache();
+    return null;
+}
+
+function ensureTeamLogoResolvedAsync(teamName) {
+    const normKey = normalizeText(teamName);
+    if (!normKey || normKey.length < 2 || pendingTeamLogoLookups.has(normKey)) {
+        return;
+    }
+    const cached = dynamicTeamLogoCache[normKey];
+    if (cached && (cached.logoUrl || (cached.notFound && (Date.now() - Number(cached.updatedAt || 0) < 24 * 60 * 60 * 1000)))) {
+        return;
+    }
+    pendingTeamLogoLookups.add(normKey);
+    fetchTuttocampoTeamInfo(teamName)
+        .then(info => {
+            if (info?.logoUrl) {
+                debouncedRefreshTeamLogosUi();
+            }
+        })
+        .catch(() => {})
+        .finally(() => {
+            pendingTeamLogoLookups.delete(normKey);
+        });
 }
 
 function getTeamLogoForPreview(teamName) {
@@ -1316,6 +1657,12 @@ function getTeamLogoForPreview(teamName) {
     if (dbLogo) {
         return dbLogo;
     }
+    const normKey = normalizeText(name);
+    const cached = dynamicTeamLogoCache[normKey];
+    if (cached?.logoUrl) {
+        return cached.logoUrl;
+    }
+    ensureTeamLogoResolvedAsync(name);
     return '';
 }
 
@@ -1612,9 +1959,21 @@ async function loadRelevantGmailMessages() {
     try {
         setGmailStatus('Ricerca email rilevanti in corso...');
         const fetchMessageRefs = async rawQuery => {
-            const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=60&includeSpamTrash=false&q=${encodeURIComponent(rawQuery)}`;
-            const listData = await gmailApiFetchJson(listUrl);
-            return Array.isArray(listData?.messages) ? listData.messages : [];
+            const collected = [];
+            let pageToken = '';
+            for (let page = 0; page < 2; page++) {
+                const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+                const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=150&includeSpamTrash=false&q=${encodeURIComponent(rawQuery)}${tokenParam}`;
+                const listData = await gmailApiFetchJson(listUrl);
+                if (Array.isArray(listData?.messages)) {
+                    collected.push(...listData.messages);
+                }
+                pageToken = String(listData?.nextPageToken || '').trim();
+                if (!pageToken || collected.length >= 220) {
+                    break;
+                }
+            }
+            return collected;
         };
 
         let messages = await fetchMessageRefs(query);
@@ -1690,6 +2049,7 @@ async function loadRelevantGmailMessages() {
         const validCount = gmailPreviewItems.filter(item => item.valid).length;
         const sourceLabel = usedFallback ? ' (query fallback automatica)' : '';
         setGmailStatus(`Email lette: ${gmailPreviewItems.length}. Partite riconosciute: ${validCount}.${sourceLabel}`, true);
+        scheduleAutoSyncRefereedMatches();
     } catch (error) {
         setGmailStatus(`Import Gmail fallito: ${error.message}`);
     }
@@ -1753,6 +2113,7 @@ async function importSelectedGmailEvents() {
 
     if (!imported) {
         setGmailStatus(`Nessun nuovo evento importato. Duplicati: ${duplicates}.`);
+        await autoSyncMapAndLogosFromRefereedMatches({ interactive: false });
         return;
     }
 
@@ -1760,6 +2121,7 @@ async function importSelectedGmailEvents() {
     await persistDashboardEvents();
     setGmailStatus(`Import completato. Nuovi eventi: ${imported}. Duplicati saltati: ${duplicates}.`, true);
     showDashboardToast(`Import Gmail completato: ${imported} eventi.`, 'ok');
+    await autoSyncMapAndLogosFromRefereedMatches({ interactive: true });
 }
 
 async function autoSyncGmailDesignazioni() {
@@ -1800,11 +2162,23 @@ async function autoSyncGmailDesignazioni() {
 
         setGmailStatus('Ricerca designazioni AIA da tutte le sezioni...', false);
 
-        const query = String(gmailIntegrationPrefs.query || GMAIL_DEFAULT_QUERY).trim() || GMAIL_DEFAULT_QUERY;
+        const query = upgradeGmailQueryWindow(gmailIntegrationPrefs.query || GMAIL_DEFAULT_QUERY);
         const fetchMessageRefs = async rawQuery => {
-            const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=80&includeSpamTrash=false&q=${encodeURIComponent(rawQuery)}`;
-            const listData = await gmailApiFetchJson(listUrl);
-            return Array.isArray(listData?.messages) ? listData.messages : [];
+            const collected = [];
+            let pageToken = '';
+            for (let page = 0; page < 2; page++) {
+                const tokenParam = pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : '';
+                const listUrl = `https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=150&includeSpamTrash=false&q=${encodeURIComponent(rawQuery)}${tokenParam}`;
+                const listData = await gmailApiFetchJson(listUrl);
+                if (Array.isArray(listData?.messages)) {
+                    collected.push(...listData.messages);
+                }
+                pageToken = String(listData?.nextPageToken || '').trim();
+                if (!pageToken || collected.length >= 220) {
+                    break;
+                }
+            }
+            return collected;
         };
 
         let messages = await fetchMessageRefs(query);
@@ -1919,6 +2293,8 @@ async function autoSyncGmailDesignazioni() {
             setGmailStatus(msg, true);
             showDashboardToast(msg, 'warn');
         }
+
+        await autoSyncMapAndLogosFromRefereedMatches({ interactive: true });
 
     } catch (error) {
         setGmailStatus(`Errore sincronizzazione: ${error.message}`);
@@ -2626,6 +3002,471 @@ async function autoSuggestFieldFromDesignazione(evento) {
         showDashboardToast('Nuovo campo non presente: inviato automaticamente in revisione.', 'warn');
     } catch {
         // silenzioso: non blocca l'inserimento evento dashboard
+    }
+}
+
+function formatTitleCaseLabel(raw) {
+    const str = String(raw || '').replace(/\s+/g, ' ').trim();
+    if (!str) {
+        return '';
+    }
+    const upperAcronyms = new Set(['ASD', 'SSD', 'USD', 'POL', 'FC', 'AC', 'AS', 'SS', 'US', 'CSL', 'DLF', 'SNC', 'RM', 'VT', 'LT', 'FR', 'RI']);
+    return str
+        .split(' ')
+        .map(word => {
+            const clean = word.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+            if (upperAcronyms.has(clean)) {
+                return word.toUpperCase();
+            }
+            if (word.length <= 2) {
+                return word.toLowerCase();
+            }
+            return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+        })
+        .join(' ')
+        .replace(/^\w/, c => c.toUpperCase());
+}
+
+async function geocodeFieldLocation(rawInfo = {}) {
+    const fromMaps = extractCoordinatesFromMapsUrl(rawInfo.mapsUrl || '');
+    if (fromMaps && hasValidMapCoords(fromMaps.lat, fromMaps.lng)) {
+        return {
+            lat: Number(fromMaps.lat.toFixed(6)),
+            lng: Number(fromMaps.lng.toFixed(6))
+        };
+    }
+
+    const rawComune = String(rawInfo.comune || rawInfo.luogo || '')
+        .replace(/\s*\([A-Z]{2}\)\s*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const rawIndirizzo = String(rawInfo.indirizzo || '')
+        .replace(/\bS\.?N\.?C\.?\b/gi, '')
+        .replace(/\bKM\s*\d+(?:[.,]\d+)?\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const rawImpianto = String(rawInfo.impianto || rawInfo.nome || '')
+        .split('|').pop()
+        .replace(/\b(?:SINTEX|SINTETICO|ERBA|CAMPO\s+[A-Z0-9]|C11|C5|C8)\b/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const queries = [];
+    const pushQ = q => {
+        const clean = String(q || '').replace(/\s+/g, ' ').trim();
+        if (clean.length >= 4 && !queries.includes(clean)) {
+            queries.push(clean);
+        }
+    };
+
+    if (rawIndirizzo && rawComune) {
+        pushQ(`${rawIndirizzo}, ${rawComune}, Italia`);
+    }
+    if (rawImpianto && rawComune) {
+        pushQ(`Campo Sportivo ${rawImpianto}, ${rawComune}, Italia`);
+        pushQ(`${rawImpianto}, ${rawComune}, Italia`);
+    }
+    if (rawIndirizzo) {
+        pushQ(`${rawIndirizzo}, Lazio, Italia`);
+    }
+    if (rawComune) {
+        pushQ(`Campo Sportivo ${rawComune}, Lazio, Italia`);
+        pushQ(`${rawComune}, Lazio, Italia`);
+    }
+
+    const normComune = normalizeText(rawComune);
+
+    for (const q of queries) {
+        try {
+            const url = `https://photon.komoot.io/api/?limit=4&lat=42.0&lon=12.2&q=${encodeURIComponent(q)}`;
+            const response = await fetch(url, { method: 'GET' });
+            if (!response.ok) {
+                continue;
+            }
+            const data = await response.json();
+            const features = Array.isArray(data?.features) ? data.features : [];
+            const validFeatures = features.filter(f => {
+                const coords = f?.geometry?.coordinates;
+                if (!Array.isArray(coords) || coords.length < 2) {
+                    return false;
+                }
+                const lng = Number(coords[0]);
+                const lat = Number(coords[1]);
+                return Number.isFinite(lat) && Number.isFinite(lng) && lat >= 35.0 && lat <= 47.5 && lng >= 6.0 && lng <= 19.0;
+            });
+            if (!validFeatures.length) {
+                continue;
+            }
+
+            let chosen = validFeatures[0];
+            if (normComune) {
+                const cityMatched = validFeatures.find(f => {
+                    const p = f?.properties || {};
+                    const hay = normalizeText([p.city, p.name, p.town, p.village, p.county, p.district].filter(Boolean).join(' '));
+                    return hay.includes(normComune) || normComune.includes(hay);
+                });
+                if (cityMatched) {
+                    chosen = cityMatched;
+                }
+            }
+
+            const [lng, lat] = chosen.geometry.coordinates;
+            return {
+                lat: Number(Number(lat).toFixed(6)),
+                lng: Number(Number(lng).toFixed(6))
+            };
+        } catch {
+            // try next query
+        }
+    }
+
+    return null;
+}
+
+function scheduleAutoSyncRefereedMatches(delayMs = 600) {
+    if (autoSyncRefereedTimer) {
+        clearTimeout(autoSyncRefereedTimer);
+    }
+    autoSyncRefereedTimer = setTimeout(() => {
+        autoSyncMapAndLogosFromRefereedMatches({ interactive: false });
+    }, delayMs);
+}
+
+async function autoSyncMapAndLogosFromRefereedMatches(options = {}) {
+    const interactive = Boolean(options?.interactive);
+    if (isAutoSyncingRefereedMatches) {
+        return;
+    }
+    isAutoSyncingRefereedMatches = true;
+
+    const syncBtn = document.getElementById('syncRefereedMapBtn');
+    if (syncBtn) {
+        syncBtn.disabled = true;
+        syncBtn.textContent = '⏳ Ricerca squadre, loghi e campi...';
+    }
+
+    try {
+        const fb = window.matchMapFirebase;
+        const user = getCurrentDashboardUser();
+
+        if (!luoghiDb.length) {
+            const cached = readEnrichedLuoghiCache();
+            if (cached.length) {
+                luoghiDb = cached;
+            }
+        }
+
+        // 1. Raccogli tutte le partite arbitrate da dashboardEvents, gmailPreviewItems e suggestions Firebase
+        const allMatchRecords = [];
+        dashboardEvents.forEach(ev => {
+            if (ev && (ev.squadre || ev.locationText || ev.impianto || ev.luogo)) {
+                allMatchRecords.push(ev);
+            }
+        });
+        gmailPreviewItems.forEach(item => {
+            if (item?.valid && item?.evento) {
+                allMatchRecords.push(item.evento);
+            }
+        });
+
+        if (user && fb?.ready && fb.db) {
+            try {
+                const sugSnap = await fb.db.ref('suggestions').once('value');
+                if (sugSnap.exists()) {
+                    const sugItems = Object.values(sugSnap.val() || {});
+                    sugItems.forEach(s => {
+                        const ext = s?.extracted || {};
+                        if (ext.squadre || ext.locationText || ext.impianto || s?.team) {
+                            allMatchRecords.push(sanitizeEventoLocation({
+                                squadre: ext.squadre || s.team || '',
+                                luogo: ext.luogo || '',
+                                impianto: ext.impianto || '',
+                                indirizzo: ext.indirizzo || '',
+                                designazioneS4yRaw: ext.designazioneS4y || '',
+                                locationText: ext.locationText || '',
+                                mapsUrl: s.mapsUrl || '',
+                                coordinates: s.coordinates || null
+                            }));
+                        }
+                    });
+                }
+            } catch {
+                // suggestions potrebbe non essere accessibile se non loggato
+            }
+        }
+
+        let newFieldsAdded = 0;
+        let updatedFieldsCount = 0;
+        let logosResolvedCount = 0;
+
+        // 2. Risolvi i loghi su Tuttocampo per tutte le squadre (casa e ospite) delle partite arbitrate
+        const uniqueTeams = new Set();
+        allMatchRecords.forEach(ev => {
+            const [teamA, teamB] = splitMatchTeams(ev?.squadre || '');
+            if (teamA) uniqueTeams.add(teamA.trim());
+            if (teamB) uniqueTeams.add(teamB.trim());
+        });
+
+        for (const teamName of uniqueTeams) {
+            const info = await fetchTuttocampoTeamInfo(teamName);
+            if (info?.logoUrl) {
+                logosResolvedCount += 1;
+            }
+        }
+
+        // 3. Collega o crea il campo in luoghiDb per ogni partita arbitrata
+        for (const rawEv of allMatchRecords) {
+            const ev = sanitizeEventoLocation(rawEv);
+            const [teamA] = splitMatchTeams(ev.squadre || '');
+            const homeTeam = String(teamA || '').trim();
+            const hasLocationInfo = Boolean(ev.luogo || ev.impianto || ev.indirizzo || ev.locationText);
+            if (!hasLocationInfo && !homeTeam) {
+                continue;
+            }
+
+            const teamInfo = homeTeam ? await fetchTuttocampoTeamInfo(homeTeam) : null;
+            const teamLogoOrScheda = teamInfo?.schedaUrl || teamInfo?.logoUrl || '';
+            const designazioneS4y = buildDesignazioneS4y(ev);
+            const cleanComune = formatTitleCaseLabel(String(ev.luogo || '').replace(/\s*\([A-Z]{2}\)\s*$/i, '').trim()) || ev.luogo || '';
+
+            let existing = findExistingLuogoForEvento(ev);
+            if (!existing && homeTeam && !ev.impianto && !ev.indirizzo) {
+                existing = findBestLogoEntryForTeam(homeTeam);
+            }
+
+            if (existing) {
+                let touched = false;
+
+                // Aggiorna designazioneS4y per collegamento diretto Home <-> Mappa
+                if (designazioneS4y && !luogoHasDesignazioneKey(existing, designazioneS4y)) {
+                    const currentS4y = Array.isArray(existing.designazioneS4y)
+                        ? [...existing.designazioneS4y]
+                        : (existing.designazioneS4y ? [String(existing.designazioneS4y)] : []);
+                    currentS4y.push(designazioneS4y);
+                    existing.designazioneS4y = currentS4y;
+                    touched = true;
+                }
+
+                // Aggiorna aliases (incluso nome squadra di casa e impianto)
+                const currentAliases = getLuogoAliases(existing);
+                const candidateAliases = [
+                    homeTeam,
+                    teamInfo?.matchedLabel || '',
+                    ev.impianto || '',
+                    ev.luogo || '',
+                    ev.indirizzo || '',
+                    ev.locationText || ''
+                ].map(x => String(x || '').trim()).filter(Boolean);
+
+                candidateAliases.forEach(al => {
+                    if (!currentAliases.some(a => normalizeText(a) === normalizeText(al))) {
+                        currentAliases.push(al);
+                        touched = true;
+                    }
+                });
+                existing.aliases = currentAliases;
+
+                if (!existing.indirizzo && ev.indirizzo) {
+                    existing.indirizzo = formatTitleCaseLabel(ev.indirizzo);
+                    touched = true;
+                }
+                if (!existing.comune && cleanComune) {
+                    existing.comune = cleanComune;
+                    touched = true;
+                }
+
+                // Se sullo stesso campo gioca un'altra società (es. Dopolavoro Football Club sul campo del CSL Soccer),
+                // aggiungi anche il suo nome e il suo logo Tuttocampo al pin mappa!
+                if (homeTeam && teamLogoOrScheda) {
+                    const currentLogos = String(existing.logoUrl || existing.logo || '')
+                        .split(/[,;\n]+/)
+                        .map(x => x.trim())
+                        .filter(Boolean);
+                    const newTeamId = extractTuttocampoTeamId(teamLogoOrScheda);
+                    const alreadyHasLogo = currentLogos.some(l => {
+                        const lId = extractTuttocampoTeamId(l);
+                        return l === teamLogoOrScheda || (newTeamId && lId && newTeamId === lId);
+                    });
+
+                    if (!alreadyHasLogo) {
+                        currentLogos.push(teamLogoOrScheda);
+                        existing.logoUrl = currentLogos.join(', ');
+                        touched = true;
+                    }
+
+                    const rawNome = String(existing.nome || '');
+                    const [teamsPart, venuePart] = rawNome.includes('|')
+                        ? rawNome.split('|').map(x => x.trim())
+                        : [rawNome.trim(), ''];
+                    const subTeams = teamsPart.split('/').map(x => x.trim()).filter(Boolean);
+                    const alreadyHasTeamName = subTeams.some(st => scoreTeamLabelMatch(homeTeam, st) >= 120);
+                    if (!alreadyHasTeamName) {
+                        const prettyHome = teamInfo?.matchedLabel || formatTitleCaseLabel(homeTeam);
+                        subTeams.push(prettyHome);
+                        existing.team = subTeams.join(' / ');
+                        existing.nome = venuePart ? `${existing.team} | ${venuePart}` : existing.team;
+                        touched = true;
+                    }
+                }
+
+                if (!hasValidMapCoords(existing.lat, existing.lng)) {
+                    const coords = (rawEv.coordinates && hasValidMapCoords(rawEv.coordinates.lat, rawEv.coordinates.lng))
+                        ? rawEv.coordinates
+                        : await geocodeFieldLocation({
+                            impianto: ev.impianto || existing.nome,
+                            indirizzo: ev.indirizzo || existing.indirizzo,
+                            comune: cleanComune || existing.comune,
+                            mapsUrl: existing.mapsUrl || rawEv.mapsUrl
+                        });
+                    if (coords) {
+                        existing.lat = coords.lat;
+                        existing.lng = coords.lng;
+                        if (!existing.mapsUrl || existing.mapsUrl.includes('/maps/search/')) {
+                            existing.mapsUrl = `https://www.google.com/maps?q=${coords.lat},${coords.lng}`;
+                        }
+                        touched = true;
+                    }
+                }
+
+                if (touched) {
+                    updatedFieldsCount += 1;
+                }
+            } else if (hasLocationInfo) {
+                const coords = (rawEv.coordinates && hasValidMapCoords(rawEv.coordinates.lat, rawEv.coordinates.lng))
+                    ? rawEv.coordinates
+                    : await geocodeFieldLocation({
+                        impianto: ev.impianto,
+                        indirizzo: ev.indirizzo,
+                        comune: cleanComune,
+                        mapsUrl: rawEv.mapsUrl
+                    });
+
+                const prettyHome = teamInfo?.matchedLabel || formatTitleCaseLabel(homeTeam);
+                const prettyImpianto = formatTitleCaseLabel(ev.impianto);
+                let fieldTitle = '';
+                if (prettyHome && prettyImpianto && scoreTeamLabelMatch(prettyHome, prettyImpianto) < 120) {
+                    fieldTitle = `${prettyHome} | ${prettyImpianto}`;
+                } else {
+                    fieldTitle = prettyHome || prettyImpianto || cleanComune || 'Campo Sportivo';
+                }
+
+                const mapsUrl = coords
+                    ? `https://www.google.com/maps?q=${coords.lat},${coords.lng}`
+                    : (rawEv.mapsUrl || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ev.locationText || fieldTitle)}`);
+
+                const aliases = Array.from(new Set([
+                    homeTeam,
+                    prettyHome,
+                    ev.impianto,
+                    prettyImpianto,
+                    ev.luogo,
+                    cleanComune,
+                    ev.indirizzo,
+                    ev.locationText
+                ].map(x => String(x || '').trim()).filter(Boolean)));
+
+                luoghiDb.push({
+                    nome: fieldTitle,
+                    team: prettyHome || homeTeam,
+                    comune: cleanComune,
+                    indirizzo: formatTitleCaseLabel(ev.indirizzo || ''),
+                    lat: coords ? coords.lat : null,
+                    lng: coords ? coords.lng : null,
+                    mapsUrl,
+                    logoUrl: teamLogoOrScheda,
+                    aliases,
+                    designazioneS4y: designazioneS4y ? [designazioneS4y] : []
+                });
+                newFieldsAdded += 1;
+            }
+        }
+
+        // 4. Controlla anche tutti i luoghi già presenti in luoghiDb a cui mancano logo o coordinate
+        for (const item of luoghiDb) {
+            let itemTouched = false;
+            const currentLogos = String(item?.logoUrl || item?.logo || '')
+                .split(/[,;\n]+/)
+                .map(x => x.trim())
+                .filter(Boolean);
+            const listedTeams = String(item?.team || item?.nome || '')
+                .split('|')[0]
+                .split('/')
+                .map(x => x.trim())
+                .filter(Boolean);
+
+            for (const subTeam of listedTeams) {
+                const hasMatchingSlug = currentLogos.some(l => {
+                    const slug = extractTuttocampoTeamSlug(l);
+                    return !slug || scoreTeamLabelMatch(subTeam, slug) >= 45;
+                });
+                if (!hasMatchingSlug) {
+                    const info = await fetchTuttocampoTeamInfo(subTeam);
+                    const candUrl = info?.schedaUrl || info?.logoUrl || '';
+                    if (candUrl && !currentLogos.includes(candUrl)) {
+                        currentLogos.unshift(candUrl);
+                        item.logoUrl = currentLogos.join(', ');
+                        itemTouched = true;
+                    }
+                }
+            }
+            if (!hasValidMapCoords(item?.lat, item?.lng)) {
+                const coords = await geocodeFieldLocation({
+                    impianto: item?.nome,
+                    indirizzo: item?.indirizzo,
+                    comune: item?.comune,
+                    mapsUrl: item?.mapsUrl
+                });
+                if (coords) {
+                    item.lat = coords.lat;
+                    item.lng = coords.lng;
+                    if (!item.mapsUrl || item.mapsUrl.includes('/maps/search/')) {
+                        item.mapsUrl = `https://www.google.com/maps?q=${coords.lat},${coords.lng}`;
+                    }
+                    itemTouched = true;
+                }
+            }
+            if (itemTouched) {
+                updatedFieldsCount += 1;
+            }
+        }
+
+        // 5. Salva nella cache locale e, se admin loggato, direttamente su Firebase RTDB ('luoghi')
+        writeEnrichedLuoghiCache(luoghiDb);
+        if ( (newFieldsAdded > 0 || updatedFieldsCount > 0) && user && isDashboardAdmin(user) && fb?.ready && fb.db ) {
+            try {
+                await fb.db.ref('luoghi').set(luoghiDb);
+            } catch (err) {
+                console.warn('Salvataggio luoghi su Firebase non riuscito:', err?.message);
+            }
+        }
+
+        // 6. Ricarica la mappa e le card della Home Page collegate
+        renderLuoghiMap();
+        renderMapSearchSuggestions();
+        if (dashboardEvents.length) {
+            renderDashboardEvents();
+        }
+        if (gmailPreviewItems.length) {
+            renderGmailPreviewList();
+        }
+
+        if (interactive) {
+            const totalMatches = allMatchRecords.length;
+            showDashboardToast(
+                `Mappa e Home sincronizzate (${totalMatches} gare analizzate, +${newFieldsAdded} nuovi campi, ${updatedFieldsCount} aggiornati, ${logosResolvedCount} loghi).`,
+                'ok'
+            );
+        }
+    } catch (error) {
+        if (interactive) {
+            showDashboardToast(`Errore sincronizzazione campi: ${error.message}`, 'err');
+        }
+    } finally {
+        isAutoSyncingRefereedMatches = false;
+        if (syncBtn) {
+            syncBtn.disabled = false;
+            syncBtn.textContent = '🔄 Sincronizza Squadre e Campi Arbitrati';
+        }
     }
 }
 
@@ -3491,6 +4332,7 @@ async function importDashboardEventsFromCsv(csvText) {
         dashboardEvents = dedupeDashboardEvents(dashboardEvents);
         renderDashboardEvents();
         await persistDashboardEvents();
+        scheduleAutoSyncRefereedMatches();
         const msg = duplicateCount > 0
             ? `Importate ${addedCount} nuove partite (${duplicateCount} duplicati saltati).`
             : `Importate con successo ${addedCount} partite!`;
@@ -3569,6 +4411,7 @@ async function loadDashboardEvents() {
             if (needsCleanupSave) {
                 persistDashboardEvents();
             }
+            scheduleAutoSyncRefereedMatches();
             return;
         } catch (error) {
             console.warn('Errore lettura cloud dashboard:', error.message);
@@ -3588,6 +4431,7 @@ async function loadDashboardEvents() {
         dashboardEvents = [];
     }
     renderDashboardEvents();
+    scheduleAutoSyncRefereedMatches();
 }
 
 async function aggiungiEvento() {
@@ -3602,6 +4446,7 @@ async function aggiungiEvento() {
     const alreadyExists = dashboardEvents.some(existing => buildEventFingerprint(existing) === newFingerprint);
     if (alreadyExists) {
         showDashboardToast('Designazione gia caricata nel tuo MatchMap.', 'warn');
+        scheduleAutoSyncRefereedMatches();
         return;
     }
 
@@ -3610,6 +4455,7 @@ async function aggiungiEvento() {
     renderDashboardEvents();
     await persistDashboardEvents();
     await autoSuggestFieldFromDesignazione(evento);
+    scheduleAutoSyncRefereedMatches(150);
     textarea.value = '';
 }
 
@@ -4266,6 +5112,10 @@ function extractCoordinatesFromMapsUrl(url) {
     if (match) {
         return { lat: Number(match[1]), lng: Number(match[2]) };
     }
+    match = value.match(/[?&](?:q|query|ll)=(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)/i);
+    if (match) {
+        return { lat: Number(match[1]), lng: Number(match[2]) };
+    }
     return null;
 }
 
@@ -4428,6 +5278,7 @@ window.disconnectGmailIntegration = disconnectGmailIntegration;
 window.loadRelevantGmailMessages = loadRelevantGmailMessages;
 window.importSelectedGmailEvents = importSelectedGmailEvents;
 window.toggleSelectAllGmailEvents = toggleSelectAllGmailEvents;
+window.autoSyncMapAndLogosFromRefereedMatches = autoSyncMapAndLogosFromRefereedMatches;
 
 const mapQuickSearchInput = document.getElementById('mapQuickSearchInput');
 const mapQuickSearchSuggestions = document.getElementById('mapQuickSearchSuggestions');
