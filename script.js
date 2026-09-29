@@ -719,6 +719,7 @@ let dashboardEvents = [];
 let dashboardShowAllHidden = false;
 let dashboardEventAutoRefreshTimer = null;
 const SUGGESTION_COOLDOWN_KEY = 'matchmap_last_suggestion_ts_v1';
+const GMAIL_TOKEN_CACHE_KEY = 'matchmap_gmail_token_cache_v1';
 let gmailTokenClient = null;
 let gmailAccessToken = '';
 let gmailTokenExpiresAt = 0;
@@ -730,6 +731,42 @@ let gmailIntegrationPrefs = {
     linkedEmail: '',
     updatedAt: 0
 };
+
+function saveGmailTokenCache(token, expiresAt) {
+    gmailAccessToken = String(token || '').trim();
+    gmailTokenExpiresAt = Number(expiresAt || 0);
+    try {
+        if (gmailAccessToken && gmailTokenExpiresAt > Date.now()) {
+            localStorage.setItem(GMAIL_TOKEN_CACHE_KEY, JSON.stringify({
+                accessToken: gmailAccessToken,
+                expiresAt: gmailTokenExpiresAt
+            }));
+        } else {
+            localStorage.removeItem(GMAIL_TOKEN_CACHE_KEY);
+        }
+    } catch {
+        // ignore storage errors
+    }
+}
+
+function loadGmailTokenCache() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(GMAIL_TOKEN_CACHE_KEY) || 'null');
+        const token = String(raw?.accessToken || '').trim();
+        const expiresAt = Number(raw?.expiresAt || 0);
+        if (token && Date.now() < (expiresAt - 10000)) {
+            gmailAccessToken = token;
+            gmailTokenExpiresAt = expiresAt;
+            return true;
+        }
+        localStorage.removeItem(GMAIL_TOKEN_CACHE_KEY);
+    } catch {
+        // ignore storage errors
+    }
+    return false;
+}
+
+loadGmailTokenCache();
 
 function getGmailUiRefs() {
     return {
@@ -757,6 +794,9 @@ function escapeHtml(value) {
 }
 
 function isGmailTokenValid() {
+    if (!gmailAccessToken || Date.now() >= (gmailTokenExpiresAt - 5000)) {
+        loadGmailTokenCache();
+    }
     return Boolean(gmailAccessToken) && Date.now() < (gmailTokenExpiresAt - 5000);
 }
 
@@ -854,31 +894,16 @@ async function loadGmailIntegrationPrefsForCurrentUser() {
     if (queryInput) {
         queryInput.value = gmailIntegrationPrefs.query || GMAIL_DEFAULT_QUERY;
     }
+    loadGmailTokenCache();
     updateGmailUiState();
-
-    // prova a ripristinare in automatico il token Gmail dopo refresh
-    // (senza prompt consenso, best-effort)
-    if (user && gmailIntegrationPrefs.enabled && !isGmailTokenValid()) {
-        restoreGmailSessionSilently();
+    if (gmailIntegrationPrefs.enabled && isGmailTokenValid()) {
+        autoSyncGmailDesignazioni({ silent: true });
     }
 }
 
 async function restoreGmailSessionSilently() {
-    try {
-        const tokenResponse = await createGmailTokenRequester();
-        const token = String(tokenResponse?.access_token || '').trim();
-        if (!token) {
-            return;
-        }
-        gmailAccessToken = token;
-        const expiresIn = Number(tokenResponse?.expires_in || 0);
-        gmailTokenExpiresAt = Date.now() + (Number.isFinite(expiresIn) ? expiresIn * 1000 : 0);
-        updateGmailUiState();
-        setGmailStatus('Sessione Gmail ripristinata automaticamente.', true);
-    } catch {
-        // normale: in alcuni browser/account Google richiede comunque interazione utente
-        updateGmailUiState();
-    }
+    loadGmailTokenCache();
+    updateGmailUiState();
 }
 
 function decodeBase64Url(value) {
@@ -1881,9 +1906,10 @@ async function connectGmailIntegration() {
     try {
         setGmailStatus('Autorizzazione Gmail in corso...');
         const tokenResponse = await createGmailTokenRequester({ silent: false });
-        gmailAccessToken = String(tokenResponse?.access_token || '').trim();
+        const token = String(tokenResponse?.access_token || '').trim();
         const expiresIn = Number(tokenResponse?.expires_in || 0);
-        gmailTokenExpiresAt = Date.now() + (Number.isFinite(expiresIn) ? expiresIn * 1000 : 0);
+        const expiresAt = Date.now() + (Number.isFinite(expiresIn) ? expiresIn * 1000 : 0);
+        saveGmailTokenCache(token, expiresAt);
 
         gmailIntegrationPrefs.enabled = true;
         const queryInput = document.getElementById('gmailQueryInput');
@@ -1903,8 +1929,7 @@ async function connectGmailIntegration() {
 
 async function disconnectGmailIntegration() {
     const previousToken = gmailAccessToken;
-    gmailAccessToken = '';
-    gmailTokenExpiresAt = 0;
+    saveGmailTokenCache('', 0);
     gmailPreviewItems = [];
     gmailSelectAllState = false;
     gmailIntegrationPrefs.enabled = false;
@@ -1930,8 +1955,7 @@ async function gmailApiFetchJson(url) {
     });
 
     if (response.status === 401 || response.status === 403) {
-        gmailAccessToken = '';
-        gmailTokenExpiresAt = 0;
+        saveGmailTokenCache('', 0);
         updateGmailUiState();
         throw new Error('Sessione Gmail scaduta. Ricollega Gmail.');
     }
@@ -2124,7 +2148,8 @@ async function importSelectedGmailEvents() {
     await autoSyncMapAndLogosFromRefereedMatches({ interactive: true });
 }
 
-async function autoSyncGmailDesignazioni() {
+async function autoSyncGmailDesignazioni(options = {}) {
+    const silent = Boolean(options?.silent);
     const quickBtn = document.getElementById('gmailAutoSyncBtn');
     const innerBtn = document.getElementById('gmailSyncInnerBtn');
     const syncBtns = [quickBtn, innerBtn].filter(Boolean);
@@ -2143,14 +2168,19 @@ async function autoSyncGmailDesignazioni() {
     };
 
     try {
+        if (!isGmailTokenValid() && silent) {
+            updateGmailUiState();
+            return;
+        }
         setSyncLoading(true);
 
         if (!isGmailTokenValid()) {
             setGmailStatus('Richiesta autorizzazione Gmail in corso...');
             const tokenResponse = await createGmailTokenRequester({ silent: false });
-            gmailAccessToken = String(tokenResponse?.access_token || '').trim();
+            const token = String(tokenResponse?.access_token || '').trim();
             const expiresIn = Number(tokenResponse?.expires_in || 0);
-            gmailTokenExpiresAt = Date.now() + (Number.isFinite(expiresIn) ? expiresIn * 1000 : 0);
+            const expiresAt = Date.now() + (Number.isFinite(expiresIn) ? expiresIn * 1000 : 0);
+            saveGmailTokenCache(token, expiresAt);
             gmailIntegrationPrefs.enabled = true;
             const profileEmail = await fetchGmailProfileEmail();
             if (profileEmail) {
@@ -2191,7 +2221,9 @@ async function autoSyncGmailDesignazioni() {
         if (!messages.length) {
             clearGmailPreview();
             setGmailStatus('Nessuna email di designazione trovata nella casella.');
-            showDashboardToast('Nessuna email di designazione trovata su Gmail.', 'warn');
+            if (!silent) {
+                showDashboardToast('Nessuna email di designazione trovata su Gmail.', 'warn');
+            }
             return;
         }
 
@@ -2247,7 +2279,9 @@ async function autoSyncGmailDesignazioni() {
 
         if (!validMatches.length) {
             setGmailStatus(`Lette ${messages.length} email: nessuna nuova partita valida trovata (riunioni ed eventi amministrativi sono stati esclusi).`);
-            showDashboardToast('Nessuna nuova partita valida estratta da Gmail.', 'warn');
+            if (!silent) {
+                showDashboardToast('Nessuna nuova partita valida estratta da Gmail.', 'warn');
+            }
             return;
         }
 
@@ -2291,14 +2325,18 @@ async function autoSyncGmailDesignazioni() {
         } else {
             const msg = `Tutte le ${duplicates} partite trovate nelle email sono già presenti nella dashboard.`;
             setGmailStatus(msg, true);
-            showDashboardToast(msg, 'warn');
+            if (!silent) {
+                showDashboardToast(msg, 'warn');
+            }
         }
 
-        await autoSyncMapAndLogosFromRefereedMatches({ interactive: true });
+        await autoSyncMapAndLogosFromRefereedMatches({ interactive: !silent });
 
     } catch (error) {
-        setGmailStatus(`Errore sincronizzazione: ${error.message}`);
-        showDashboardToast(`Errore Gmail: ${error.message}`, 'err');
+        if (!silent) {
+            setGmailStatus(`Errore sincronizzazione: ${error.message}`);
+            showDashboardToast(`Errore Gmail: ${error.message}`, 'err');
+        }
     } finally {
         setSyncLoading(false);
     }
