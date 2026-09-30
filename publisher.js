@@ -2436,6 +2436,670 @@ if (suggestionsList) {
     });
 }
 
+const GEMINI_VISION_API_KEY_STORAGE = 'matchmap_publisher_gemini_api_key_v1';
+
+const STANDARD_AIA_PAYMENT_REGIONS = [
+    { canonical: 'Abruzzo', patterns: ['abruzzo'] },
+    { canonical: 'Basilicata', patterns: ['basilicata'] },
+    { canonical: 'Calabria', patterns: ['calabria'] },
+    { canonical: 'Campania', patterns: ['campania'] },
+    { canonical: 'Emilia-Romagna', patterns: ['emilia romagna', 'emilia-romagna', 'emilia'] },
+    { canonical: 'Friuli-Venezia Giulia', patterns: ['friuli venezia giulia', 'friuli-venezia giulia', 'friuli'] },
+    { canonical: 'Lazio', patterns: ['lazio'] },
+    { canonical: 'Liguria', patterns: ['liguria'] },
+    { canonical: 'Lombardia', patterns: ['lombardia'] },
+    { canonical: 'Marche', patterns: ['marche'] },
+    { canonical: 'Molise', patterns: ['molise'] },
+    { canonical: "Piemonte/Valle D'Aosta", patterns: ['piemonte valle d aosta', 'piemonte vda', 'piemonte', 'valle d aosta'] },
+    { canonical: 'Puglia', patterns: ['puglia'] },
+    { canonical: 'Sardegna', patterns: ['sardegna'] },
+    { canonical: 'Sicilia', patterns: ['sicilia'] },
+    { canonical: 'Toscana', patterns: ['toscana'] },
+    { canonical: 'Umbria', patterns: ['umbria'] },
+    { canonical: 'Veneto', patterns: ['veneto'] },
+    { canonical: 'Bolzano', patterns: ['bolzano', 'cpa bolzano'] },
+    { canonical: 'Trento', patterns: ['trento', 'cpa trento'] }
+];
+
+function setOcrStatus(message, type = '') {
+    const el = document.getElementById('paymentsOcrStatus');
+    if (!el) {
+        return;
+    }
+    el.textContent = message;
+    el.className = `status ${type}`.trim();
+}
+
+function buildNewsSummaryForRegionRow(regionLabel, row, cols) {
+    const colInPag = String(cols?.inPagamento || 'Pacchi in pagamento').trim();
+    const colMid = String(cols?.fineFebbraio || 'Metà mese').trim();
+    const colEnd = String(cols?.chat || 'Fine mese').trim();
+    const valInPag = String(row?.inPagamento || '').trim();
+    const valMid = String(row?.fineFebbraio || '').trim();
+    const valEnd = String(row?.chat || '').trim();
+    const stato = String(row?.stato || 'Previsto da tabella').trim();
+
+    const parts = [];
+    const titleBadges = [];
+    if (valInPag) {
+        parts.push(`${colInPag}: pacco/i ${valInPag}`);
+        titleBadges.push(valInPag);
+    }
+    if (valMid) {
+        parts.push(`${colMid}: pacco/i ${valMid}`);
+        titleBadges.push(valMid);
+    }
+    if (valEnd) {
+        parts.push(`${colEnd}: pacco/i ${valEnd}`);
+        titleBadges.push(valEnd);
+    }
+
+    const badgeSummary = titleBadges.length ? `pacchi ${titleBadges.join(' / ')}` : 'situazione aggiornata';
+    const titolo = `${regionLabel}: quadro ${badgeSummary}`;
+    const testo = parts.length
+        ? `Tabella aggiornata — ${parts.join('; ')}. Stato: ${stato}.`
+        : `Tabella: nessun nuovo pacco indicato al momento per ${regionLabel}. Stato: ${stato}.`;
+
+    return normalizeNews({ regione: regionLabel, titolo, testo });
+}
+
+async function syncRegionalNewsFromPaymentsTable(autoPublish = false) {
+    if (!requirePublisherAdmin()) {
+        return false;
+    }
+    if (!paymentsItems.length) {
+        setOcrStatus('La tabella pagamenti e vuota: importa o compila prima i dati.', 'err');
+        return false;
+    }
+
+    const cols = normalizePaymentColumns(paymentsColumns);
+    const generatedByRegion = new Map();
+
+    let bolzanoRow = null;
+    let trentoRow = null;
+
+    paymentsItems.forEach(rawRow => {
+        const row = normalizePayment(rawRow);
+        const regNorm = normalizeText(row.regione);
+        if (!regNorm) {
+            return;
+        }
+        if (regNorm.includes('piemonte') || regNorm.includes('valle d aosta')) {
+            generatedByRegion.set('piemonte', buildNewsSummaryForRegionRow('Piemonte', row, cols));
+            generatedByRegion.set('valle d aosta', buildNewsSummaryForRegionRow("Valle d'Aosta", row, cols));
+            return;
+        }
+        if (regNorm.includes('bolzano')) {
+            bolzanoRow = row;
+            return;
+        }
+        if (regNorm.includes('trento')) {
+            trentoRow = row;
+            return;
+        }
+        generatedByRegion.set(regNorm, buildNewsSummaryForRegionRow(row.regione, row, cols));
+    });
+
+    if (bolzanoRow || trentoRow) {
+        const bzText = bolzanoRow
+            ? [
+                bolzanoRow.inPagamento ? `in pagamento ${bolzanoRow.inPagamento}` : '',
+                bolzanoRow.fineFebbraio ? `${cols.fineFebbraio}: ${bolzanoRow.fineFebbraio}` : '',
+                bolzanoRow.chat ? `${cols.chat}: ${bolzanoRow.chat}` : ''
+            ].filter(Boolean).join(', ')
+            : '';
+        const tnText = trentoRow
+            ? [
+                trentoRow.inPagamento ? `in pagamento ${trentoRow.inPagamento}` : '',
+                trentoRow.fineFebbraio ? `${cols.fineFebbraio}: ${trentoRow.fineFebbraio}` : '',
+                trentoRow.chat ? `${cols.chat}: ${trentoRow.chat}` : ''
+            ].filter(Boolean).join(', ')
+            : '';
+        const combinedText = `Tabella: Bolzano (${bzText || 'n.d.'}); Trento (${tnText || 'n.d.'}).`;
+        generatedByRegion.set('trentino alto adige', normalizeNews({
+            regione: 'Trentino-Alto Adige',
+            titolo: 'Trentino-Alto Adige: quadro Bolzano/Trento',
+            testo: combinedText
+        }));
+    }
+
+    const updatedNews = [];
+    const handledKeys = new Set();
+
+    newsItems.forEach(item => {
+        const key = normalizeText(item.regione);
+        if (key && key !== 'tutti' && generatedByRegion.has(key)) {
+            if (!handledKeys.has(key)) {
+                updatedNews.push(generatedByRegion.get(key));
+                handledKeys.add(key);
+            }
+        } else {
+            updatedNews.push(normalizeNews(item));
+        }
+    });
+
+    generatedByRegion.forEach((newsObj, key) => {
+        if (!handledKeys.has(key)) {
+            updatedNews.unshift(newsObj);
+            handledKeys.add(key);
+        }
+    });
+
+    newsItems = updatedNews;
+    saveNewsDraft();
+    populateRegionSelect();
+    newsItems.forEach(item => ensureRegionOption(item.regione));
+    renderAll();
+
+    if (autoPublish) {
+        await publishNewsFirebase();
+    }
+    setOcrStatus(`News regionali sincronizzate (${generatedByRegion.size} regioni aggiornate dalla tabella)!`, 'ok');
+    return true;
+}
+
+function parseTelegramPacchiTableText(rawText) {
+    const text = String(rawText || '').trim();
+    if (!text) {
+        return { updatedCount: 0, columnsUpdated: false };
+    }
+
+    const lines = text
+        .split(/\r?\n/)
+        .map(l => l.replace(/[|¦]/g, '  ').trim())
+        .filter(Boolean);
+
+    let columnsUpdated = false;
+    const monthsRegex = /(?:meta|metà|fine|inizio)\s+(?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)/gi;
+    const detectedHeaders = [];
+    lines.slice(0, 6).forEach(line => {
+        const matches = line.match(monthsRegex);
+        if (matches) {
+            matches.forEach(m => {
+                const clean = m.trim().replace(/^meta\b/i, 'Metà').replace(/^fine\b/i, 'Fine');
+                if (!detectedHeaders.some(h => normalizeText(h) === normalizeText(clean))) {
+                    detectedHeaders.push(clean);
+                }
+            });
+        }
+    });
+
+    if (detectedHeaders.length >= 2) {
+        paymentsColumns.fineFebbraio = detectedHeaders[0];
+        paymentsColumns.chat = detectedHeaders[1];
+        columnsUpdated = true;
+    } else if (detectedHeaders.length === 1) {
+        paymentsColumns.fineFebbraio = detectedHeaders[0];
+        columnsUpdated = true;
+    }
+
+    const existingByRegion = new Map();
+    paymentsItems.forEach(item => {
+        const key = normalizeText(item.regione);
+        if (key) {
+            existingByRegion.set(key, normalizePayment(item));
+        }
+    });
+
+    let updatedCount = 0;
+    const parsedMap = new Map();
+
+    for (const line of lines) {
+        const lineNorm = normalizeText(line);
+        if (!lineNorm) {
+            continue;
+        }
+        let matchedRegion = null;
+        let matchedPattern = '';
+        for (const reg of STANDARD_AIA_PAYMENT_REGIONS) {
+            for (const pat of reg.patterns) {
+                if (lineNorm.startsWith(pat + ' ') || lineNorm === pat || lineNorm.includes(pat)) {
+                    if (pat.length > matchedPattern.length) {
+                        matchedRegion = reg;
+                        matchedPattern = pat;
+                    }
+                }
+            }
+        }
+        if (!matchedRegion) {
+            continue;
+        }
+
+        // Remove region name from the line to parse the pacchi columns
+        const regRegex = new RegExp(matchedPattern.split(' ').join('[\\s\\-/\\\']*'), 'i');
+        let remainder = line.replace(regRegex, '').trim();
+        remainder = remainder
+            .replace(/previsto da tabella|pagamento confermato|da monitorare/gi, '')
+            .trim();
+
+        // Extract pacchi groups (e.g. "13 e 14", "14-15", "15")
+        const pacchiGroups = [];
+        const groupRegex = /\b\d{1,2}(?:\s*(?:e|,|-|\/|ed)\s*\d{1,2})*\b/gi;
+        const rawMatches = [];
+        let m;
+        while ((m = groupRegex.exec(remainder)) !== null) {
+            const val = m[0].replace(/\s+/g, ' ').trim();
+            const nums = val.match(/\d+/g)?.map(Number) || [];
+            if (nums.every(n => n >= 1 && n <= 30)) {
+                rawMatches.push({
+                    text: val,
+                    index: m.index
+                });
+            }
+        }
+
+        let inPagamento = '';
+        let fineFebbraio = '';
+        let chat = '';
+
+        if (rawMatches.length >= 3) {
+            inPagamento = rawMatches[0].text;
+            fineFebbraio = rawMatches[1].text;
+            chat = rawMatches[2].text;
+        } else if (rawMatches.length === 2) {
+            // In typical AIA tables with 2 active columns (e.g. Metà mese & Fine mese)
+            fineFebbraio = rawMatches[0].text;
+            chat = rawMatches[1].text;
+        } else if (rawMatches.length === 1) {
+            const matchPos = rawMatches[0].index;
+            if (matchPos > remainder.length * 0.55 && remainder.length > 6) {
+                chat = rawMatches[0].text;
+            } else {
+                fineFebbraio = rawMatches[0].text;
+            }
+        }
+
+        let stato = 'Previsto da tabella';
+        if (/confermat|pagat|accredit/i.test(line)) {
+            stato = 'Pagamento confermato';
+        } else if (/monitor/i.test(line)) {
+            stato = 'Da monitorare';
+        }
+
+        parsedMap.set(matchedRegion.canonical, normalizePayment({
+            regione: matchedRegion.canonical,
+            inPagamento,
+            fineFebbraio,
+            chat,
+            stato
+        }));
+        updatedCount += 1;
+    }
+
+    if (updatedCount > 0) {
+        paymentsItems = STANDARD_AIA_PAYMENT_REGIONS.map(reg => {
+            if (parsedMap.has(reg.canonical)) {
+                return parsedMap.get(reg.canonical);
+            }
+            const existing = existingByRegion.get(normalizeText(reg.canonical));
+            return existing || normalizePayment({
+                regione: reg.canonical,
+                inPagamento: '',
+                fineFebbraio: '',
+                chat: '',
+                stato: 'Previsto da tabella'
+            });
+        });
+    }
+
+    return { updatedCount, columnsUpdated };
+}
+
+async function analyzeTelegramImageWithGemini(fileOrBlob, apiKey) {
+    const base64Data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+            const res = String(reader.result || '');
+            const commaIdx = res.indexOf(',');
+            resolve(commaIdx >= 0 ? res.slice(commaIdx + 1) : res);
+        };
+        reader.onerror = () => reject(new Error('Impossibile leggere il file immagine.'));
+        reader.readAsDataURL(fileOrBlob);
+    });
+
+    const mimeType = fileOrBlob.type || 'image/jpeg';
+    const prompt = `Analizza questa immagine inviata su un gruppo Telegram arbitrale riguardante la tabella pagamento pacchi (rimborsi AIA) per le 20 regioni/CRA italiani.
+Estrai con precisione assoluta:
+1. I titoli delle colonne in "columns":
+   - "regione": "Regione"
+   - "inPagamento": titolo prima colonna pacchi (es. "Pacchi in pagamento")
+   - "fineFebbraio": titolo seconda colonna temporale visibile nell'immagine (es. "Metà aprile", "Metà maggio", "Fine febbraio", ecc.)
+   - "chat": titolo terza colonna temporale o riscontro (es. "Fine aprile", "Fine maggio", "Riscontro chat", ecc.)
+   - "stato": "Stato"
+2. L'array "items" con tutte le 20 regioni nell'ordine esatto:
+   Abruzzo, Basilicata, Calabria, Campania, Emilia-Romagna, Friuli-Venezia Giulia, Lazio, Liguria, Lombardia, Marche, Molise, Piemonte/Valle D'Aosta, Puglia, Sardegna, Sicilia, Toscana, Umbria, Veneto, Bolzano, Trento.
+   Per ogni regione inserisci le stringhe esatte dei pacchi nelle rispettive colonne ("inPagamento", "fineFebbraio", "chat") lasciando "" se la cella e vuota, e imposta "stato" a "Previsto da tabella" (o "Pagamento confermato" se evidenziato in verde/pagato).
+Restituisci ESCLUSIVAMENTE un oggetto JSON valido con chiavi "columns" e "items".`;
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            contents: [{
+                parts: [
+                    { text: prompt },
+                    { inlineData: { mimeType, data: base64Data } }
+                ]
+            }],
+            generationConfig: {
+                temperature: 0.1,
+                responseMimeType: 'application/json'
+            }
+        })
+    });
+
+    if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        throw new Error(`Gemini API HTTP ${response.status}: ${errText.slice(0, 140)}`);
+    }
+
+    const result = await response.json();
+    const rawJsonText = result?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const parsed = JSON.parse(rawJsonText);
+    if (!parsed || !Array.isArray(parsed.items) || !parsed.items.length) {
+        throw new Error('Risposta Gemini non contiene righe valide.');
+    }
+    return parsed;
+}
+
+let tesseractScriptPromise = null;
+function ensureTesseractLoaded() {
+    if (window.Tesseract) {
+        return Promise.resolve(window.Tesseract);
+    }
+    if (tesseractScriptPromise) {
+        return tesseractScriptPromise;
+    }
+    tesseractScriptPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+        script.onload = () => resolve(window.Tesseract);
+        script.onerror = () => {
+            tesseractScriptPromise = null;
+            reject(new Error('Impossibile caricare il motore OCR Tesseract.js.'));
+        };
+        document.head.appendChild(script);
+    });
+    return tesseractScriptPromise;
+}
+
+async function preprocessImageForOcr(fileOrBlob) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(fileOrBlob);
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            const scale = img.width < 1100 ? 2 : 1;
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width * scale;
+            canvas.height = img.height * scale;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imgData.data;
+            for (let i = 0; i < data.length; i += 4) {
+                const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+                const contrasted = gray > 165 ? 255 : gray < 90 ? 0 : gray;
+                data[i] = contrasted;
+                data[i + 1] = contrasted;
+                data[i + 2] = contrasted;
+            }
+            ctx.putImageData(imgData, 0, 0);
+            canvas.toBlob(blob => resolve(blob || fileOrBlob), 'image/png');
+        };
+        img.onerror = () => {
+            URL.revokeObjectURL(url);
+            resolve(fileOrBlob);
+        };
+        img.src = url;
+    });
+}
+
+async function processTelegramPaymentImage(fileOrBlob) {
+    if (!requirePublisherAdmin()) {
+        return;
+    }
+    if (!fileOrBlob) {
+        return;
+    }
+
+    const previewWrap = document.getElementById('paymentsOcrPreviewWrap');
+    const previewImg = document.getElementById('paymentsOcrPreviewImg');
+    if (previewWrap && previewImg) {
+        previewImg.src = URL.createObjectURL(fileOrBlob);
+        previewWrap.hidden = false;
+    }
+
+    const apiKeyInput = document.getElementById('paymentsGeminiApiKey');
+    const apiKey = String(apiKeyInput?.value || localStorage.getItem(GEMINI_VISION_API_KEY_STORAGE) || '').trim();
+    if (apiKey) {
+        localStorage.setItem(GEMINI_VISION_API_KEY_STORAGE, apiKey);
+    }
+
+    const autoNews = Boolean(document.getElementById('paymentsAutoNewsChk')?.checked);
+    const autoPublish = Boolean(document.getElementById('paymentsAutoPublishChk')?.checked);
+
+    try {
+        if (apiKey) {
+            setOcrStatus('🤖 Analisi immagine Telegram in corso con Gemini AI Vision...', '');
+            const geminiData = await analyzeTelegramImageWithGemini(fileOrBlob, apiKey);
+            if (geminiData.columns) {
+                paymentsColumns = normalizePaymentColumns({
+                    ...paymentsColumns,
+                    ...geminiData.columns
+                });
+            }
+            paymentsItems = geminiData.items.map(normalizePayment);
+            savePaymentsDraft();
+            renderPaymentsSheet();
+
+            if (autoNews) {
+                await syncRegionalNewsFromPaymentsTable(false);
+            }
+            if (autoPublish) {
+                await publishPaymentsFirebase();
+                if (autoNews) {
+                    await publishNewsFirebase();
+                }
+            }
+            setOcrStatus(`✅ Tabella letta con precisione AI Vision (${paymentsItems.length} regioni)${autoPublish ? ' e pubblicata live su Firebase!' : '!'}`, 'ok');
+            return;
+        }
+
+        setOcrStatus('🔍 Lettura OCR dell\'immagine Telegram in corso (attendere 3-5 secondi)...', '');
+        const TesseractLib = await ensureTesseractLoaded();
+        const processedBlob = await preprocessImageForOcr(fileOrBlob);
+        const { data } = await TesseractLib.recognize(processedBlob, 'ita', {});
+        const extractedText = String(data?.text || '').trim();
+        const rawTextInput = document.getElementById('paymentsRawTextPaste');
+        if (rawTextInput && extractedText) {
+            rawTextInput.value = extractedText;
+        }
+
+        const { updatedCount } = parseTelegramPacchiTableText(extractedText);
+        if (!updatedCount) {
+            setOcrStatus('Nessuna riga regione riconosciuta nitidamente via OCR base. Inserisci una chiave Gemini API gratuita nelle impostazioni qui sopra per la lettura AI Vision al 100%, oppure verifica il testo estratto.', 'err');
+            return;
+        }
+
+        savePaymentsDraft();
+        renderPaymentsSheet();
+
+        if (autoNews) {
+            await syncRegionalNewsFromPaymentsTable(false);
+        }
+        if (autoPublish) {
+            await publishPaymentsFirebase();
+            if (autoNews) {
+                await publishNewsFirebase();
+            }
+        }
+        setOcrStatus(`✅ Estratte e aggiornate ${updatedCount} regioni dallo screenshot Telegram${autoPublish ? ' e pubblicate live su Firebase!' : '!'}`, 'ok');
+    } catch (error) {
+        setOcrStatus(`Errore analisi immagine: ${error.message}`, 'err');
+    }
+}
+
+function setupTelegramOcrAutomation() {
+    const uploadBtn = document.getElementById('paymentsUploadImageBtn');
+    const fileInput = document.getElementById('paymentsImageFileInput');
+    const pasteBtn = document.getElementById('paymentsPasteClipboardBtn');
+    const generateNewsBtn = document.getElementById('paymentsGenerateNewsBtn');
+    const parseTextBtn = document.getElementById('paymentsParseTextBtn');
+    const rawTextInput = document.getElementById('paymentsRawTextPaste');
+    const geminiKeyInput = document.getElementById('paymentsGeminiApiKey');
+    const dropZone = document.getElementById('telegramOcrDropZone');
+
+    if (geminiKeyInput) {
+        const savedKey = localStorage.getItem(GEMINI_VISION_API_KEY_STORAGE) || '';
+        if (savedKey) {
+            geminiKeyInput.value = savedKey;
+        }
+        geminiKeyInput.addEventListener('change', () => {
+            const val = geminiKeyInput.value.trim();
+            if (val) {
+                localStorage.setItem(GEMINI_VISION_API_KEY_STORAGE, val);
+            } else {
+                localStorage.removeItem(GEMINI_VISION_API_KEY_STORAGE);
+            }
+        });
+    }
+
+    if (uploadBtn && fileInput) {
+        uploadBtn.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', event => {
+            const file = event.target?.files?.[0];
+            if (file) {
+                processTelegramPaymentImage(file);
+                fileInput.value = '';
+            }
+        });
+    }
+
+    if (generateNewsBtn) {
+        generateNewsBtn.addEventListener('click', async () => {
+            const autoPublish = Boolean(document.getElementById('paymentsAutoPublishChk')?.checked);
+            await syncRegionalNewsFromPaymentsTable(autoPublish);
+        });
+    }
+
+    if (parseTextBtn && rawTextInput) {
+        parseTextBtn.addEventListener('click', async () => {
+            if (!requirePublisherAdmin()) {
+                return;
+            }
+            const raw = rawTextInput.value.trim();
+            if (!raw) {
+                setOcrStatus('Incolla prima il testo da analizzare.', 'err');
+                return;
+            }
+            const { updatedCount } = parseTelegramPacchiTableText(raw);
+            if (!updatedCount) {
+                setOcrStatus('Nessuna regione riconosciuta nel testo incollato.', 'err');
+                return;
+            }
+            savePaymentsDraft();
+            renderPaymentsSheet();
+            const autoNews = Boolean(document.getElementById('paymentsAutoNewsChk')?.checked);
+            const autoPublish = Boolean(document.getElementById('paymentsAutoPublishChk')?.checked);
+            if (autoNews) {
+                await syncRegionalNewsFromPaymentsTable(false);
+            }
+            if (autoPublish) {
+                await publishPaymentsFirebase();
+                if (autoNews) {
+                    await publishNewsFirebase();
+                }
+            }
+            setOcrStatus(`✅ Aggiornate ${updatedCount} regioni dal testo incollato!`, 'ok');
+        });
+    }
+
+    if (pasteBtn) {
+        pasteBtn.addEventListener('click', async () => {
+            if (!requirePublisherAdmin()) {
+                return;
+            }
+            try {
+                if (navigator.clipboard?.read) {
+                    const items = await navigator.clipboard.read();
+                    for (const item of items) {
+                        const imgType = item.types.find(t => t.startsWith('image/'));
+                        if (imgType) {
+                            const blob = await item.getType(imgType);
+                            await processTelegramPaymentImage(blob);
+                            return;
+                        }
+                    }
+                }
+                if (navigator.clipboard?.readText) {
+                    const text = await navigator.clipboard.readText();
+                    if (text && text.trim()) {
+                        if (rawTextInput) {
+                            rawTextInput.value = text.trim();
+                        }
+                        const { updatedCount } = parseTelegramPacchiTableText(text);
+                        if (updatedCount > 0) {
+                            savePaymentsDraft();
+                            renderPaymentsSheet();
+                            const autoNews = Boolean(document.getElementById('paymentsAutoNewsChk')?.checked);
+                            const autoPublish = Boolean(document.getElementById('paymentsAutoPublishChk')?.checked);
+                            if (autoNews) {
+                                await syncRegionalNewsFromPaymentsTable(false);
+                            }
+                            if (autoPublish) {
+                                await publishPaymentsFirebase();
+                                if (autoNews) {
+                                    await publishNewsFirebase();
+                                }
+                            }
+                            setOcrStatus(`✅ Aggiornate ${updatedCount} regioni dagli appunti!`, 'ok');
+                            return;
+                        }
+                    }
+                }
+                setOcrStatus('Nessuno screenshot o tabella valida trovata negli appunti. Premi Ctrl+V dopo aver copiato l\'immagine da Telegram.', 'err');
+            } catch {
+                setOcrStatus('Premi direttamente Ctrl+V sulla pagina per incollare l\'immagine copiata da Telegram.', 'err');
+            }
+        });
+    }
+
+    if (dropZone) {
+        dropZone.addEventListener('dragover', event => {
+            event.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+        dropZone.addEventListener('drop', event => {
+            event.preventDefault();
+            dropZone.classList.remove('drag-over');
+            const file = Array.from(event.dataTransfer?.files || []).find(f => f.type.startsWith('image/'));
+            if (file) {
+                processTelegramPaymentImage(file);
+            }
+        });
+    }
+
+    document.addEventListener('paste', event => {
+        const paymentsPage = document.getElementById('paymentsPage');
+        if (!paymentsPage || !paymentsPage.classList.contains('active')) {
+            return;
+        }
+        const items = Array.from(event.clipboardData?.items || []);
+        const imgItem = items.find(item => item.type.startsWith('image/'));
+        if (imgItem) {
+            event.preventDefault();
+            const blob = imgItem.getAsFile();
+            if (blob) {
+                processTelegramPaymentImage(blob);
+            }
+        }
+    });
+}
+
 async function initPublisher() {
     setPublisherAccess(false);
     restoreDrafts();
@@ -2445,6 +3109,7 @@ async function initPublisher() {
     bindAuthState();
     setupPublisherAuthPopover();
     setupPageTabs();
+    setupTelegramOcrAutomation();
 
     await Promise.all([
         loadNewsFromFirebase(true),
@@ -2470,4 +3135,5 @@ if (publisherAuthProfileSummaryImg) {
         publisherAuthProfileSummaryImg.removeAttribute('src');
     });
 }
+
 

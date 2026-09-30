@@ -1,4 +1,4 @@
-const CACHE_NAME = 'matchmap-v9';
+const CACHE_NAME = 'matchmap-v10';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -15,10 +15,15 @@ const CORE_ASSETS = [
   './account-center.css',
   './account-center.js',
   './manifest.webmanifest',
-  './img/logo.png'
+  './img/logo.png',
+  './img/icon-192.png',
+  './img/icon-512.png',
+  './img/icon-maskable-192.png',
+  './img/icon-maskable-512.png'
 ];
 
 self.addEventListener('install', event => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => cache.addAll(CORE_ASSETS))
   );

@@ -2,6 +2,21 @@
  * MatchMap - Shared Utilities & Database Sanitization (js/shared-utils.js)
  * ============================================================================ */
 
+window.__matchmapInstallPrompt = window.__matchmapInstallPrompt || null;
+if (typeof window.addEventListener === 'function') {
+    window.addEventListener('beforeinstallprompt', event => {
+        event.preventDefault();
+        window.__matchmapInstallPrompt = event;
+        if (typeof deferredInstallPrompt !== 'undefined') {
+            deferredInstallPrompt = event;
+        }
+        const btn = document.getElementById('installAppBtn');
+        if (btn) {
+            btn.hidden = false;
+        }
+    });
+}
+
 function normalizeText(value) {
     return (value || '')
         .toLowerCase()

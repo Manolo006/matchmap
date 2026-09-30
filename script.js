@@ -542,6 +542,11 @@ function isIosDevice() {
     return isIOS || isMacTouch;
 }
 
+function isAndroidDevice() {
+    const ua = navigator.userAgent || '';
+    return /Android/i.test(ua);
+}
+
 function isStandaloneMode() {
     const standaloneByMedia = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
     const standaloneByNavigator = Boolean(window.navigator.standalone);
@@ -552,7 +557,7 @@ function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) {
         return;
     }
-    window.addEventListener('load', () => {
+    const doRegister = () => {
         navigator.serviceWorker.register('./service-worker.js', { updateViaCache: 'none' }).then(registration => {
             registration.update().catch(() => {});
             setInterval(() => {
@@ -579,7 +584,13 @@ function registerServiceWorker() {
             window.__matchmapSwRefreshing = true;
             window.location.reload();
         });
-    });
+    };
+
+    if (document.readyState === 'complete') {
+        doRegister();
+    } else {
+        window.addEventListener('load', doRegister);
+    }
 }
 
 
@@ -591,12 +602,17 @@ function setupInstallApp() {
         return;
     }
 
+    if (window.__matchmapInstallPrompt && !deferredInstallPrompt) {
+        deferredInstallPrompt = window.__matchmapInstallPrompt;
+    }
+
     const refreshInstallButton = () => {
         if (isStandaloneMode()) {
             installBtn.hidden = true;
             return;
         }
-        if (deferredInstallPrompt || isIosDevice()) {
+        const activePrompt = deferredInstallPrompt || window.__matchmapInstallPrompt;
+        if (activePrompt || isIosDevice() || isAndroidDevice()) {
             installBtn.hidden = false;
             return;
         }
@@ -606,18 +622,28 @@ function setupInstallApp() {
     window.addEventListener('beforeinstallprompt', event => {
         event.preventDefault();
         deferredInstallPrompt = event;
+        window.__matchmapInstallPrompt = event;
         refreshInstallButton();
     });
 
     window.addEventListener('appinstalled', () => {
         deferredInstallPrompt = null;
+        window.__matchmapInstallPrompt = null;
         installBtn.hidden = true;
         showDashboardToast('App installata con successo.', 'ok');
     });
 
-    const openInstallModal = () => {
+    const openInstallModal = (mode = 'ios') => {
         if (!iosModal) {
             return;
+        }
+        const modalTextEl = iosModal.querySelector('p');
+        if (modalTextEl) {
+            if (mode === 'android') {
+                modalTextEl.innerHTML = 'Su Android apri il menu <strong>⋮</strong> (tre puntini in alto a destra su Chrome) e tocca <strong>Installa app</strong> oppure <strong>Aggiungi a schermata Home</strong>.';
+            } else {
+                modalTextEl.textContent = 'Su iPhone/iPad apri il menu Condividi di Safari e scegli Aggiungi alla schermata Home.';
+            }
         }
         iosModal.classList.add('open');
         iosModal.setAttribute('aria-hidden', 'false');
@@ -638,23 +664,30 @@ function setupInstallApp() {
             return;
         }
 
-        if (deferredInstallPrompt) {
-            deferredInstallPrompt.prompt();
-            const choice = await deferredInstallPrompt.userChoice.catch(() => null);
+        const activePrompt = deferredInstallPrompt || window.__matchmapInstallPrompt;
+        if (activePrompt) {
+            activePrompt.prompt();
+            const choice = await activePrompt.userChoice.catch(() => null);
             if (choice?.outcome !== 'accepted') {
                 showDashboardToast('Installazione annullata.', 'warn');
             }
             deferredInstallPrompt = null;
+            window.__matchmapInstallPrompt = null;
             refreshInstallButton();
             return;
         }
 
-        if (isIosDevice()) {
-            openInstallModal();
+        if (isAndroidDevice()) {
+            openInstallModal('android');
             return;
         }
 
-        showDashboardToast('Installazione non disponibile in questo browser.', 'warn');
+        if (isIosDevice()) {
+            openInstallModal('ios');
+            return;
+        }
+
+        showDashboardToast('Usa il menu del browser (⋮) -> Installa MatchMap.', 'warn');
     });
 
     if (closeModalBtn && iosModal) {

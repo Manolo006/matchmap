@@ -96,6 +96,48 @@
     </section>
 
     <section id="paymentsPage" class="publisher-page">
+        <section class="card telegram-ocr-card" id="telegramOcrDropZone">
+            <div class="ocr-header-row">
+                <div>
+                    <h2>📸 Automazione Pagamento Pacchi (da Immagine Telegram)</h2>
+                    <p class="muted">Carica o incolla (Ctrl+V) lo screenshot della tabella pacchi dal gruppo Telegram: aggiorna tutte le 20 regioni e le News in 1 click.</p>
+                </div>
+                <span class="ocr-badge">OCR + AI Vision</span>
+            </div>
+            <div class="actions actions-inline ocr-main-actions">
+                <button id="paymentsUploadImageBtn" class="primary" type="button">📸 Carica Immagine / Screenshot</button>
+                <button id="paymentsPasteClipboardBtn" type="button">📋 Incolla da Appunti (Ctrl+V)</button>
+                <button id="paymentsGenerateNewsBtn" type="button" title="Genera e aggiorna automaticamente le News di ogni regione partendo dalla Tabella Pagamenti">📰 Genera News da Tabella</button>
+                <input type="file" id="paymentsImageFileInput" accept="image/*" hidden>
+            </div>
+            <div class="ocr-options-row">
+                <label class="ocr-check-label">
+                    <input type="checkbox" id="paymentsAutoNewsChk" checked>
+                    <span>Aggiorna automaticamente anche le News regionali</span>
+                </label>
+                <label class="ocr-check-label">
+                    <input type="checkbox" id="paymentsAutoPublishChk" checked>
+                    <span>Pubblica subito su Firebase a fine lettura</span>
+                </label>
+            </div>
+            <div id="paymentsOcrPreviewWrap" class="ocr-preview-wrap" hidden>
+                <img id="paymentsOcrPreviewImg" class="ocr-preview-img" alt="Anteprima screenshot Telegram">
+            </div>
+            <details class="ocr-advanced-details">
+                <summary>⚙️ Precisione 100% con Gemini AI Vision / Incolla Testo o Script Telegram</summary>
+                <div class="grid ocr-advanced-grid">
+                    <label class="muted" for="paymentsGeminiApiKey">Chiave API Google Gemini (opzionale, gratuita su aistudio.google.com - salvata nel browser per lettura visuale perfetta):</label>
+                    <input id="paymentsGeminiApiKey" type="password" placeholder="AIzaSy... (opzionale: se vuota usa OCR integrato gratuito)" autocomplete="off">
+                    <label class="muted" for="paymentsRawTextPaste">Oppure incolla testo copiato da Telegram / Google Lens:</label>
+                    <textarea id="paymentsRawTextPaste" placeholder="Incolla qui righe tipo: Lazio 13 | 14 e 15..."></textarea>
+                    <div class="actions actions-inline">
+                        <button id="paymentsParseTextBtn" type="button">⚡ Analizza Testo Incollato</button>
+                    </div>
+                </div>
+            </details>
+            <p id="paymentsOcrStatus" class="status"></p>
+        </section>
+
         <section class="card">
             <h2>Pagamenti (Modalita Foglio)</h2>
             <p class="muted">Modifica direttamente le celle come in un foglio Excel, poi premi Pubblica Pagamenti.</p>
