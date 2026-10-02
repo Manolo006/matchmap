@@ -61,6 +61,7 @@ function getGmailUiRefs() {
     return {
         queryInput: document.getElementById('gmailQueryInput'),
         statusEl: document.getElementById('gmailStatus'),
+        badgeEl: document.getElementById('gmailBadgeStatus'),
         connectBtn: document.getElementById('gmailConnectBtn'),
         disconnectBtn: document.getElementById('gmailDisconnectBtn'),
         loadBtn: document.getElementById('gmailLoadBtn'),
@@ -1097,22 +1098,46 @@ function clearGmailPreview() {
 }
 
 function updateGmailUiState() {
-    const { connectBtn, disconnectBtn, loadBtn, queryInput } = getGmailUiRefs();
-    if (!connectBtn || !disconnectBtn || !loadBtn || !queryInput) {
+    const { connectBtn, disconnectBtn, loadBtn, queryInput, badgeEl, autoSyncBtn } = getGmailUiRefs();
+    if (!connectBtn && !disconnectBtn) {
         return;
     }
 
     const tokenReady = isGmailTokenValid();
-    connectBtn.hidden = tokenReady;
-    disconnectBtn.hidden = !gmailIntegrationPrefs.enabled;
-    loadBtn.hidden = !tokenReady;
-    queryInput.disabled = !gmailIntegrationPrefs.enabled;
+    if (connectBtn) {
+        connectBtn.hidden = tokenReady;
+    }
+    if (disconnectBtn) {
+        disconnectBtn.hidden = !gmailIntegrationPrefs.enabled;
+    }
+    if (loadBtn) {
+        loadBtn.hidden = !tokenReady;
+    }
+    if (queryInput) {
+        queryInput.disabled = !gmailIntegrationPrefs.enabled;
+    }
+    if (autoSyncBtn) {
+        autoSyncBtn.disabled = false;
+    }
+
+    if (badgeEl) {
+        if (tokenReady) {
+            badgeEl.textContent = 'Attiva';
+            badgeEl.className = 'auth-gmail-badge badge-active';
+        } else if (gmailIntegrationPrefs.enabled) {
+            badgeEl.textContent = 'Collegata';
+            badgeEl.className = 'auth-gmail-badge badge-linked';
+        } else {
+            badgeEl.textContent = 'Non collegata';
+            badgeEl.className = 'auth-gmail-badge';
+        }
+    }
 
     if (!gmailIntegrationPrefs.enabled) {
-        setGmailStatus('Gmail non collegata. Clicca "⚡ Sincronizza Gmail" per autorizzare e importare le partite in automatico.');
+        setGmailStatus('Gmail non collegata. Clicca "Collega Gmail" per sincronizzare le partite in automatico.');
     } else if (!tokenReady) {
         const linked = gmailIntegrationPrefs.linkedEmail ? ` (${gmailIntegrationPrefs.linkedEmail})` : '';
-        setGmailStatus(`Gmail collegata${linked}. Clicca "⚡ Sincronizza Gmail" per sincronizzare.`);
+        setGmailStatus(`Gmail collegata${linked}. Clicca "⚡ Sincronizza Partite" per rinnovare la sessione.`);
     } else {
         const linked = gmailIntegrationPrefs.linkedEmail ? ` come ${gmailIntegrationPrefs.linkedEmail}` : '';
         setGmailStatus(`Gmail attiva${linked}. Pronto alla sincronizzazione automatica.`, true);

@@ -53,6 +53,26 @@
                     <a id="publisherAdminLink" href="publisher.html" class="auth-link-btn auth-link-btn-publisher" hidden>Publisher</a>
                 </div>
                 <p id="dashboardAuthStatus" class="auth-status">Modalita ospite attiva.</p>
+
+                <div class="auth-section-divider"></div>
+                <div class="auth-gmail-box">
+                    <div class="auth-gmail-header">
+                        <span class="auth-gmail-title">
+                            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+                            Gmail AIA
+                        </span>
+                        <span id="gmailBadgeStatus" class="auth-gmail-badge">Non collegata</span>
+                    </div>
+                    <p id="gmailStatus" class="auth-status auth-gmail-desc">Sincronizza automaticamente le designazioni ricevute via email da tutte le sezioni AIA.</p>
+                    <div class="auth-actions auth-gmail-actions">
+                        <button id="gmailAutoSyncBtn" class="primary-btn auth-gmail-sync-btn" type="button" onclick="autoSyncGmailDesignazioni()" title="Sincronizza subito le partite ricevute via email">
+                            ⚡ Sincronizza Partite
+                        </button>
+                        <button id="gmailConnectBtn" class="auth-link-btn" type="button" onclick="connectGmailIntegration()">Collega Gmail</button>
+                        <button id="gmailDisconnectBtn" class="auth-link-btn auth-link-btn-danger" type="button" onclick="disconnectGmailIntegration()" hidden>Scollega Gmail</button>
+                    </div>
+                    <input id="gmailQueryInput" type="hidden" value="from:(...) subject:(...) newer_than:730d">
+                </div>
             </div>
         </div>
         </div>
@@ -73,60 +93,15 @@
             <textarea id="designazione" placeholder="Incolla qui la designazione"></textarea>
             <div class="input-actions-row">
                 <button class="primary-btn" onclick="aggiungiEvento()">Aggiungi Evento</button>
-                <button class="primary-btn paste-quick-btn" type="button" onclick="incollaEAggiungiEvento()" title="Incolla dagli appunti e aggiungi subito la designazione con 1 click">📋 Incolla e Aggiungi</button>
-                <button id="gmailAutoSyncBtn" class="primary-btn gmail-quick-sync-btn" type="button" onclick="autoSyncGmailDesignazioni()" title="Sincronizza automaticamente le designazioni ricevute da tutte le sezioni AIA via Gmail">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg>
-                    <span>Sincronizza Gmail</span>
-                </button>
             </div>
-            <details id="gmailImportPanel" class="gmail-panel">
-                <summary>
-                    Integrazione Gmail AIA (opzionale, automatico)
-                    <span class="gmail-panel-badge">AIA &amp; CRA</span>
-                </summary>
-                <p class="gmail-privacy-note">
-                    Riconosce in automatico le designazioni ricevute da tutte le sezioni AIA d'Italia, CRA e Sinfonia4You escludendo riunioni tecniche (RTO), assemblee, quote e circolari.
-                </p>
-                <p class="gmail-privacy-note gmail-privacy-note-secondary">
-                    Nessuna credenziale Sinfonia4You viene salvata: MatchMap legge solo le email in arrivo autorizzate in sola lettura.
-                </p>
-                <div class="gmail-actions">
-                    <button id="gmailSyncInnerBtn" type="button" class="gmail-inner-sync-btn" onclick="autoSyncGmailDesignazioni()">⚡ Sincronizzazione automatica 1-Click</button>
-                    <button id="gmailConnectBtn" type="button" onclick="connectGmailIntegration()">Collega Gmail</button>
-                    <button id="gmailDisconnectBtn" type="button" onclick="disconnectGmailIntegration()" hidden>Scollega Gmail</button>
-                    <button id="gmailLoadBtn" type="button" onclick="loadRelevantGmailMessages()" hidden>Cerca solo anteprima</button>
-                </div>
-                <div class="gmail-query-wrap">
-                    <label for="gmailQueryInput">Filtro Gmail (solo lettura)</label>
-                    <input id="gmailQueryInput" type="text" placeholder="from:(...) subject:(...) newer_than:180d" autocomplete="off">
-                </div>
-                <p id="gmailStatus" class="auth-status">Funzione disattivata. Usa il flusso principale copia/incolla.</p>
-                <div id="gmailPreviewWrap" class="gmail-preview-wrap" hidden>
-                    <h3>Anteprima email / partite estratte</h3>
-                    <div id="gmailPreviewList" class="gmail-preview-list"></div>
-                    <div class="gmail-actions gmail-actions-bottom">
-                        <button id="gmailImportSelectedBtn" type="button" onclick="importSelectedGmailEvents()" hidden>Importa selezionati</button>
-                        <button id="gmailSelectAllBtn" type="button" onclick="toggleSelectAllGmailEvents()" hidden>Seleziona tutti</button>
-                    </div>
-                </div>
-            </details>
             <div class="total" id="rimborsoTotale">Rimborso totale: 0 &euro;</div>
         </div>
 
         <div class="panel table-panel">
             <div class="table-header-row">
                 <h2>Eventi inseriti</h2>
-                <div class="dashboard-csv-actions">
+                <div class="dashboard-search-wrap">
                     <input id="dashboardSearchInput" type="search" class="dashboard-search-input" placeholder="🔍 Cerca squadra, campo o data..." autocomplete="off">
-                    <button id="dashboardExportCsvBtn" class="csv-action-btn" type="button" onclick="exportDashboardEventsToCsv()" title="Esporta le partite in formato CSV / Excel">
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"></path></svg>
-                        <span>Esporta CSV</span>
-                    </button>
-                    <button id="dashboardImportCsvBtn" class="csv-action-btn" type="button" onclick="document.getElementById('dashboardCsvFileInput')?.click()" title="Importa partite da file CSV">
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"></path></svg>
-                        <span>Importa CSV</span>
-                    </button>
-                    <input type="file" id="dashboardCsvFileInput" accept=".csv,.tsv,.txt" hidden onchange="handleDashboardCsvFileSelect(event)">
                 </div>
             </div>
             <div class="table-wrap">

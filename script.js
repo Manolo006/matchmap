@@ -1758,17 +1758,32 @@ function setupAuthPopover() {
         return;
     }
 
+    const setPopoverOpen = isOpen => {
+        popover.hidden = !isOpen;
+        toggleBtn.setAttribute('aria-expanded', String(isOpen));
+    };
+
     toggleBtn.addEventListener('click', event => {
         event.stopPropagation();
-        popover.hidden = !popover.hidden;
+        setPopoverOpen(popover.hidden);
     });
 
     popover.addEventListener('click', event => {
         event.stopPropagation();
+        const target = event.target;
+        if (target && target.tagName === 'A') {
+            setPopoverOpen(false);
+        }
     });
 
     document.addEventListener('click', () => {
-        popover.hidden = true;
+        setPopoverOpen(false);
+    });
+
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape' && !popover.hidden) {
+            setPopoverOpen(false);
+        }
     });
 }
 

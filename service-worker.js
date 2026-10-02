@@ -1,4 +1,4 @@
-const CACHE_NAME = 'matchmap-v10';
+const CACHE_NAME = 'matchmap-v11';
 const CORE_ASSETS = [
   './',
   './index.html',

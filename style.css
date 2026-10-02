@@ -20,6 +20,8 @@
 html {
     font-size: clamp(13px, 1.55vw, 16px);
     -webkit-text-size-adjust: 100%;
+    overflow-x: hidden;
+    max-width: 100vw;
 }
 
 img,
@@ -40,6 +42,9 @@ body {
         radial-gradient(circle at 87% 20%, rgba(76, 201, 240, 0.18), transparent 36%),
         linear-gradient(145deg, var(--bg-0), var(--bg-1));
     overflow-x: hidden;
+    max-width: 100vw;
+    width: 100%;
+    position: relative;
 }
 
 .background-glow {
@@ -255,19 +260,114 @@ button:hover {
 .auth-popover {
     position: absolute;
     right: 0;
+    left: auto;
     top: 52px;
-    width: min(360px, calc(100vw - 24px));
-    background: rgba(8, 16, 31, 0.95);
+    width: 340px;
+    max-width: calc(100vw - 24px);
+    background: rgba(8, 16, 31, 0.96);
     border: 1px solid rgba(159, 178, 221, 0.35);
     border-radius: 18px;
-    box-shadow: 0 22px 45px rgba(0, 0, 0, 0.35);
-    padding: 12px;
-    z-index: 20;
+    box-shadow: 0 22px 45px rgba(0, 0, 0, 0.45);
+    padding: 14px;
+    z-index: 1000;
+    box-sizing: border-box;
 }
 
 .auth-popover h3 {
     margin: 0 0 10px;
     font-size: 0.98rem;
+}
+
+.auth-section-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(159, 178, 221, 0.3), transparent);
+    margin: 14px 0 12px;
+}
+
+.auth-gmail-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 11px;
+    border-radius: 14px;
+    background: rgba(14, 26, 49, 0.72);
+    border: 1px solid rgba(159, 178, 221, 0.24);
+}
+
+.auth-gmail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.auth-gmail-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #e2edff;
+}
+
+.auth-gmail-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 8px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.auth-gmail-badge.badge-active {
+    color: #061527;
+    background: linear-gradient(120deg, #7ce9ff, #8af0be);
+    border-color: transparent;
+}
+
+.auth-gmail-badge.badge-linked {
+    color: #061527;
+    background: #ffd166;
+    border-color: transparent;
+}
+
+.auth-gmail-desc {
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    color: #9fb2dd;
+}
+
+.auth-gmail-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.auth-gmail-sync-btn {
+    width: 100%;
+    padding: 10px 14px;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #0c172f;
+    background: linear-gradient(120deg, #80dfff, var(--good));
+    border: none;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    box-shadow: 0 4px 14px rgba(128, 223, 255, 0.25);
+    cursor: pointer;
+}
+
+.auth-gmail-sync-btn:hover {
+    filter: brightness(1.06);
+    transform: translateY(-1px);
 }
 
 .auth-profile-summary {
@@ -1926,9 +2026,9 @@ a:hover {
     }
 
     .auth-popover {
-        right: auto;
-        left: 0;
-        width: min(420px, calc(100vw - 28px));
+        right: 0;
+        left: auto;
+        width: min(340px, calc(100vw - 24px));
     }
 }
 
@@ -1937,12 +2037,29 @@ a:hover {
         font-size: clamp(13px, 4.1vw, 16px);
     }
 
+    .auth-popover {
+        position: fixed !important;
+        top: 68px !important;
+        left: 12px !important;
+        right: 12px !important;
+        width: auto !important;
+        max-width: 380px !important;
+        margin: 0 auto !important;
+        border-radius: 20px !important;
+        box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7), 0 0 0 100vmax rgba(3, 8, 18, 0.55) !important;
+        z-index: 3000 !important;
+        max-height: calc(100dvh - 84px) !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch !important;
+    }
+
     .app-header,
     .container {
         width: 100%;
-        max-width: none;
-        padding-left: 8px;
-        padding-right: 8px;
+        max-width: 100vw;
+        padding-left: 10px;
+        padding-right: 10px;
+        box-sizing: border-box;
     }
 
     .app-header-top {
@@ -2296,15 +2413,22 @@ a:hover {
     gap: 8px;
 }
 
+.dashboard-search-wrap {
+    display: flex;
+    align-items: center;
+    width: auto;
+}
+
 .dashboard-search-input {
-    width: clamp(200px, 26vw, 280px);
+    width: clamp(200px, 32vw, 320px);
     margin: 0;
-    padding: 6px 12px;
-    font-size: 0.85rem;
-    border-radius: 10px;
+    padding: 8px 14px;
+    font-size: 0.88rem;
+    border-radius: 12px;
     background: rgba(12, 22, 42, 0.9);
     border: 1px solid rgba(130, 167, 255, 0.28);
     color: var(--text);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .dashboard-search-input:focus {
@@ -2313,62 +2437,17 @@ a:hover {
     box-shadow: 0 0 0 2px rgba(76, 201, 240, 0.18);
 }
 
-.paste-quick-btn {
-    background: linear-gradient(135deg, rgba(110, 231, 183, 0.22), rgba(76, 201, 240, 0.22));
-    color: #e8edff;
-    border: 1px solid rgba(110, 231, 183, 0.45);
-}
-
-.paste-quick-btn:hover {
-    background: linear-gradient(135deg, rgba(110, 231, 183, 0.34), rgba(76, 201, 240, 0.34));
-    border-color: rgba(110, 231, 183, 0.75);
-}
-
-.csv-action-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: rgba(18, 30, 54, 0.85);
-    color: #cbd5e1;
-    border: 1px solid rgba(148, 163, 184, 0.28);
-    border-radius: 10px;
-    padding: 6px 12px;
-    font-size: 0.84rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.18s ease;
-}
-
-.csv-action-btn:hover {
-    background: rgba(30, 48, 86, 0.95);
-    border-color: rgba(105, 209, 255, 0.6);
-    color: #ffffff;
-    transform: translateY(-1px);
-}
-
-.csv-action-btn svg {
-    width: 15px;
-    height: 15px;
-    fill: currentColor;
-    flex-shrink: 0;
-}
-
 @media (max-width: 600px) {
     .table-header-row {
         flex-direction: column;
-        align-items: flex-start;
+        align-items: stretch;
+        gap: 10px;
     }
-    .dashboard-csv-actions {
+    .dashboard-search-wrap {
         width: 100%;
     }
     .dashboard-search-input {
         width: 100%;
-        flex: 1 1 100%;
-    }
-    .csv-action-btn {
-        flex: 1;
-        justify-content: center;
-        font-size: 0.78rem;
-        padding: 7px 8px;
     }
 }
+

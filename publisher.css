@@ -19,6 +19,8 @@
 
 html {
     -webkit-text-size-adjust: 100%;
+    overflow-x: hidden;
+    max-width: 100vw;
 }
 
 img,
@@ -37,6 +39,10 @@ body {
         radial-gradient(circle at 10% 18%, rgba(105, 209, 255, 0.16), transparent 34%),
         radial-gradient(circle at 86% 20%, rgba(251, 113, 133, 0.14), transparent 32%),
         linear-gradient(145deg, var(--bg0), var(--bg1));
+    overflow-x: hidden;
+    max-width: 100vw;
+    width: 100%;
+    position: relative;
 }
 
 .bg {
@@ -564,9 +570,19 @@ body.publisher-locked .access-denied {
     }
 
     .auth-popover {
-        right: auto;
-        left: 0;
-        width: min(420px, calc(100vw - 28px));
+        position: fixed !important;
+        top: 68px !important;
+        left: 12px !important;
+        right: 12px !important;
+        width: auto !important;
+        max-width: 380px !important;
+        margin: 0 auto !important;
+        border-radius: 20px !important;
+        box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7), 0 0 0 100vmax rgba(3, 8, 18, 0.55) !important;
+        z-index: 3000 !important;
+        max-height: calc(100dvh - 84px) !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch !important;
     }
 }
 
